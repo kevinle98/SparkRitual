@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://api.scryfall.com" crossorigin>
+<link rel="preconnect" href="https://cards.scryfall.io">
+<link rel="preconnect" href="https://svgs.scryfall.io">
+<title>SparkRitual - Commander Deck Builder</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="home">
+<header class="topbar">
+  <h1><a href="#">SparkRitual</a></h1>
+  <span id="deckTitle" class="deck-title builder-only"></span>
+  <div class="spacer"></div>
+  <label class="builder-only">Sort
+    <select id="sortSelect">
+      <option value="type" selected>Card Type</option>
+      <option value="name">Alphabetical</option>
+      <option value="cmc">Mana Cost</option>
+      <option value="color">Color</option>
+    </select>
+  </label>
+  <button id="viewBtn" class="builder-only">View Options</button>
+  <button id="settingsBtn" class="builder-only">Deck Settings</button>
+  <button id="listBtn" class="builder-only">Import / Export</button>
+  <span id="syncState" class="sync builder-only"></span>
+  <button id="copyBtn" class="shared-only">Copy to my decks</button>
+  <button id="authBtn" hidden>Sign in</button>
+  <button id="newBtn">New Deck</button>
+</header>
+
+<main class="home-page" id="home">
+  <div id="musicBox" class="music-box" hidden>
+    <div id="ytPlayer"></div>
+    <div id="musicMsg" class="music-msg" hidden></div>
+    <button id="musicToggle">Mute</button>
+  </div>
+  <div class="home-inner">
+    <div class="carousel-wrap">
+      <button id="prevBtn" class="nav" aria-label="Previous deck">&#8249;</button>
+      <div id="carousel" class="carousel"></div>
+      <button id="nextBtn" class="nav" aria-label="Next deck">&#8250;</button>
+      <div id="deckInfo" class="deck-info"></div>
+    </div>
+  </div>
+</main>
+
+<main class="layout" id="builder">
+  <aside class="panel preview" id="preview">
+    <div class="preview-empty">Hover over a card to preview it.</div>
+  </aside>
+
+  <section class="panel deck">
+    <div class="searchbar" id="searchBar">
+      <input id="searchInput" type="search" placeholder="Create a deck to start searching" autocomplete="off" disabled>
+      <div id="searchDrop" class="drop">
+        <div id="searchMsg" class="msg"></div>
+        <div id="searchResults"></div>
+        <button id="moreBtn" hidden>Load more</button>
+      </div>
+    </div>
+    <div class="commander-box">
+      <div class="box-title">Commander <span id="identityLabel" class="identity"></span></div>
+      <div id="commanderSlots" class="slots"></div>
+    </div>
+    <div id="sharedDesc" class="desc shared-only"></div>
+    <div id="deckStatus" class="status"></div>
+    <div id="deckList"></div>
+  </section>
+
+  <section id="tray" class="tray collapsed" data-tab="curve">
+    <div class="tray-head">
+      <div class="tabs">
+        <button data-tab="curve" class="active">Mana Curve</button>
+        <button data-tab="hand">Test Hand</button>
+      </div>
+      <div id="handActions" class="hand-actions"></div>
+      <button id="trayToggle" class="tray-toggle" title="Show" aria-label="Show panel" aria-expanded="false">&#9660;</button>
+    </div>
+    <div class="tray-body">
+      <div id="curve" class="curve"></div>
+      <div id="hand" class="hand"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="cmdDialog">
+  <div class="dialog-head">
+    <h2>Choose Partner / Background</h2>
+    <button id="cmdClose">Close</button>
+  </div>
+  <input id="cmdInput" type="search" placeholder="Search by name">
+  <div id="cmdMsg" class="msg"></div>
+  <div id="cmdResults" class="cmd-grid"></div>
+</dialog>
+
+<dialog id="printDialog" class="wide">
+  <div class="dialog-head">
+    <h2 id="printTitle">Choose Printing</h2>
+    <button id="printClose">Close</button>
+  </div>
+  <input id="printFilter" type="search" placeholder="Filter by set name, code, number or year">
+  <div id="printMsg" class="msg"></div>
+  <div id="printGrid" class="cmd-grid"></div>
+</dialog>
+
+<dialog id="viewDialog">
+  <div class="dialog-head">
+    <h2>View Options</h2>
+    <button id="viewClose">Close</button>
+  </div>
+  <h3 class="view-h">List</h3>
+  <label class="view-opt"><input type="radio" name="viewMode" value="list"> Single</label>
+  <label class="view-opt"><input type="radio" name="viewMode" value="list2"> Dual Column</label>
+  <h3 class="view-h">Grid</h3>
+  <label class="view-opt"><input type="radio" name="viewMode" value="grid-s"> Small</label>
+  <label class="view-opt"><input type="radio" name="viewMode" value="grid-m"> Medium</label>
+  <label class="view-opt"><input type="radio" name="viewMode" value="grid-l"> Large</label>
+  <label class="view-opt"><input type="checkbox" id="viewStack"> Stacked</label>
+</dialog>
+
+<dialog id="settingsDialog">
+  <div class="dialog-head">
+    <h2>Deck Settings</h2>
+    <button id="settingsClose">Close</button>
+  </div>
+  <label class="field">Name<input id="setName" type="text" maxlength="80"></label>
+  <label class="field">Description<textarea id="setDesc" rows="6" placeholder="Strategy, notes, upgrades to make..."></textarea></label>
+  <label class="field">Landing page music (YouTube link)<input id="setMusic" type="url" placeholder="https://www.youtube.com/watch?v=..."></label>
+  <div id="shareBox" class="field" hidden>
+    Visibility
+    <select id="setVis">
+      <option value="private">Private: only you</option>
+      <option value="unlisted">Unlisted: anyone with the link</option>
+      <option value="public">Public: anyone, can be listed</option>
+    </select>
+    <div class="share-row"><input id="shareLink" type="text" readonly><button id="shareCopy">Copy link</button></div>
+  </div>
+  <div id="setMsg" class="msg"></div>
+  <div class="dialog-foot"><span></span><button id="settingsSave" class="apply">Save</button></div>
+</dialog>
+
+<dialog id="listDialog">
+  <div class="dialog-head">
+    <h2>Import / Export List</h2>
+    <button id="listClose">Close</button>
+  </div>
+  <div class="msg">One card per line, e.g. "1 Sol Ring". Use "Commander" and "Deck" headings. Applying replaces the current deck contents.</div>
+  <textarea id="listText" spellcheck="false"></textarea>
+  <div id="listMsg" class="msg"></div>
+  <div class="dialog-foot">
+    <button id="listCopy">Copy</button>
+    <button id="listApply" class="apply">Apply Changes</button>
+  </div>
+</dialog>
+
+<dialog id="newDialog" class="wide">
+  <div class="dialog-head">
+    <h2>New Deck</h2>
+    <button id="newCancel">Cancel</button>
+  </div>
+  <input id="newName" type="text" placeholder="Deck name" maxlength="80">
+  <input id="newSearch" type="search" placeholder="Search for a commander">
+  <div class="new-body">
+    <div>
+      <div id="newMsg" class="msg"></div>
+      <div id="newResults" class="new-results"></div>
+    </div>
+    <div id="newPreview" class="new-preview"><div class="preview-empty">Hover over a commander to preview it.</div></div>
+  </div>
+  <div class="dialog-foot">
+    <div class="tabs">
+      <button id="tabCmd" class="active">Commander</button>
+      <button id="tabPartner" hidden>Partner / Background (optional)</button>
+    </div>
+    <div class="foot-actions">
+      <button id="newImport">Import cards</button>
+      <button id="newCreate" disabled>Create Deck</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="newImportDialog">
+  <div class="dialog-head">
+    <h2>Import Cards</h2>
+    <button id="newImportClose">Cancel</button>
+  </div>
+  <div class="msg">One card per line, e.g. "1 Sol Ring". These are added when the deck is created. A "Commander" heading selects the commander if none is chosen yet.</div>
+  <textarea id="newImportText" spellcheck="false"></textarea>
+  <div id="newImportMsg" class="msg"></div>
+  <div class="dialog-foot">
+    <button id="newImportClear">Clear</button>
+    <button id="newImportApply" class="apply">Add to New Deck</button>
+  </div>
+</dialog>
+
+<dialog id="authDialog">
+  <div class="dialog-head">
+    <h2 id="authTitle">Sign in</h2>
+    <button id="authClose">Close</button>
+  </div>
+  <div id="authOut">
+    <div class="msg">Sign in to save decks online and share them. Decks in this browser stay available.</div>
+    <label class="field">Email<input id="authEmail" type="email" placeholder="you@example.com" autocomplete="email"></label>
+    <div class="dialog-foot"><span></span><button id="authSend" class="apply">Email me a sign-in link</button></div>
+    <div class="auth-alt">
+      <button data-provider="google">Continue with Google</button>
+      <button data-provider="discord">Continue with Discord</button>
+    </div>
+  </div>
+  <div id="authIn" hidden>
+    <label class="field">Display name (shown on shared decks)<input id="authName" type="text" maxlength="32"></label>
+    <div class="dialog-foot"><button id="authOutBtn">Sign out</button><button id="authSave" class="apply">Save name</button></div>
+  </div>
+  <div id="authMsg" class="msg"></div>
+</dialog>
+
+<script src="config.js"></script>
+<script src="cloud.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
