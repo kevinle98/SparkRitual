@@ -151,7 +151,8 @@ dialog.wide { width: 94vw; max-width: 2000px; height: 80vh; }
 #newImportDialog textarea { width: 100%; height: 50vh; resize: vertical; font: 15.6px/1.5 Consolas, monospace; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
 
 /* landing page */
-body.home #builder, body.home .builder-only, body:not(.home) #home { display: none; }
+body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.home) .home-only { display: none; }
+#homeSortDir { min-width: 34px; padding-left: 8px; padding-right: 8px; margin-left: -6px; }
 .topbar h1 a { color: inherit; text-decoration: none; }
 .home-page { position: relative; --floor: #171618; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; background: var(--floor); }
 .home-inner { width: 100%; display: flex; align-items: center; }

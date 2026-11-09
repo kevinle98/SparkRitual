@@ -28,6 +28,18 @@
   <span id="syncState" class="sync builder-only"></span>
   <button id="copyBtn" class="shared-only">Copy to my decks</button>
   <button id="authBtn" hidden>Sign in</button>
+  <label class="home-only">Sort
+    <select id="homeSort">
+      <option value="commander">Commander Name</option>
+      <option value="name">Deck Name</option>
+      <option value="created">Creation Date</option>
+      <option value="recent" selected>Recently Added</option>
+      <option value="color">Color Identity</option>
+      <option value="bracket">Bracket Level</option>
+      <option value="cost">Cost</option>
+    </select>
+  </label>
+  <button id="homeSortDir" class="home-only" title="Reverse sort order" aria-label="Reverse sort order"></button>
   <button id="newBtn">New Deck</button>
 </header>
 

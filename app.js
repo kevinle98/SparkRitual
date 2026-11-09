@@ -414,7 +414,7 @@ function restack() {
 function renderHome() {
   // Keep the same deck selected even if a sync or edit re-sorted the list.
   const keepId = homeList[homeSel] && homeList[homeSel].id;
-  homeList = Object.values(decks).sort((a, b) => b.updated - a.updated);
+  homeList = sortDecks(Object.values(decks));
   const kept = keepId ? homeList.findIndex(d => d.id === keepId) : -1;
   homeSel = Math.max(0, Math.min(kept >= 0 ? kept : homeSel, homeList.length - 1));
   stopStepping();
@@ -479,6 +479,81 @@ function deckBracket(d) {
   return bracketCache.get(key);
 }
 
+/* ---------- Carousel sorting ---------- */
+
+const priceCache = new Map();
+// Total value of the printings in the deck (commanders + every copy), using each printing's USD price.
+function deckValue(d) {
+  const key = `${d.id}:${d.updated}`;
+  if (!priceCache.has(key)) {
+    const entries = [...(d.commanders || []).map(card => ({ card, qty: 1 })), ...Object.values(d.cards || {})];
+    priceCache.set(key, entries.reduce((sum, { card, qty }) => sum + (parseFloat(card.prices && card.prices.usd) || 0) * qty, 0));
+  }
+  return priceCache.get(key);
+}
+
+// Deck ids start with Date.now() in base 36 (see newId), so creation time comes free with every deck.
+function deckCreated(d) {
+  const t = parseInt(String(d.id).slice(0, 8), 36);
+  return t > 1.4e12 && t < Date.now() + 864e5 ? t : (d.created || d.updated || 0);
+}
+
+const WUBRG = 'WUBRG';
+// Colorless first, then mono W, U, B, R, G, then pairs (WU, WB, ...), and so on up to five colors.
+function colorKey(d) {
+  const ids = new Set((d.commanders || []).flatMap(c => c.color_identity || []));
+  const idx = [...WUBRG].map((c, i) => ids.has(c) ? i : -1).filter(i => i >= 0);
+  return [idx.length, ...idx];
+}
+const cmpArr = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const x = (a[i] ?? -1) - (b[i] ?? -1); if (x) return x; } return 0; };
+const cmpText = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
+const commanderName = d => (d.commanders || []).map(c => c.name).join(' + ');
+
+// Each sort has a natural direction (desc = 1 means biggest/newest first); the topbar button reverses it.
+const HOME_SORTS = {
+  commander: { desc: 0, cmp: (a, b) => cmpText(commanderName(a) || '￿', commanderName(b) || '￿') },
+  name:      { desc: 0, cmp: (a, b) => cmpText(a.name || '', b.name || '') },
+  created:   { desc: 0, cmp: (a, b) => deckCreated(a) - deckCreated(b) },
+  recent:    { desc: 1, cmp: (a, b) => a.updated - b.updated },
+  color:     { desc: 0, cmp: (a, b) => cmpArr(colorKey(a), colorKey(b)) },
+  bracket:   { desc: 0, cmp: (a, b) => deckBracket(a).level - deckBracket(b).level },
+  cost:      { desc: 1, cmp: (a, b) => deckValue(a) - deckValue(b) },
+};
+
+let homeSort = { key: 'recent', reversed: false };
+try {
+  const saved = JSON.parse(localStorage.getItem('sparkritual.homeSort'));
+  if (saved && HOME_SORTS[saved.key]) homeSort = { key: saved.key, reversed: !!saved.reversed };
+} catch { /* keep default */ }
+
+function sortDecks(list) {
+  const s = HOME_SORTS[homeSort.key];
+  const dir = (s.desc ? -1 : 1) * (homeSort.reversed ? -1 : 1);
+  return list.sort((a, b) => dir * s.cmp(a, b) || cmpText(a.name || '', b.name || '') || (a.id < b.id ? -1 : 1));
+}
+
+function showHomeSort() {
+  const s = HOME_SORTS[homeSort.key];
+  const desc = !!s.desc !== homeSort.reversed;
+  $('homeSort').value = homeSort.key;
+  $('homeSortDir').textContent = desc ? '↓' : '↑';
+  $('homeSortDir').title = `${desc ? 'Descending' : 'Ascending'}: click to reverse`;
+}
+
+function setHomeSort(key, reversed) {
+  homeSort = { key, reversed };
+  try { localStorage.setItem('sparkritual.homeSort', JSON.stringify(homeSort)); } catch { /* not critical */ }
+  showHomeSort();
+  if (document.body.classList.contains('home')) renderHome(); // renderHome keeps the selected deck in view
+}
+
+$('homeSort').addEventListener('change', e => setHomeSort(e.target.value, false));
+$('homeSortDir').addEventListener('click', () => setHomeSort(homeSort.key, !homeSort.reversed));
+showHomeSort();
+
+const fmtUsd = n => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = t => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
 function renderInfo() {
   const d = homeList[homeSel];
   $('prevBtn').disabled = homeSel === 0;
@@ -486,10 +561,13 @@ function renderInfo() {
   const names = d.commanders.map(c => c.name).join(' + ');
   const ids = [...new Set(d.commanders.flatMap(c => c.color_identity))];
   const br = deckBracket(d);
+  // Show the value being sorted on when it isn't already one of the standard lines.
+  const extra = { cost: ['Value', fmtUsd(deckValue(d))], created: ['Created', fmtDate(deckCreated(d))], recent: ['Last edited', fmtDate(d.updated)] }[homeSort.key];
   $('deckInfo').innerHTML = `<div class="info-text"><div class="title">${esc(d.name)}</div>
     <div class="meta"><span class="lbl">Commander:</span> ${esc(names)}</div>
     <div class="meta"><span class="lbl">Bracket:</span> ${br.level}</div>
-    <div class="meta"><span class="lbl">Color Identity:</span> ${identitySymbols('WUBRG'.split('').filter(x => ids.includes(x)))}</div></div>
+    <div class="meta"><span class="lbl">Color Identity:</span> ${identitySymbols('WUBRG'.split('').filter(x => ids.includes(x)))}</div>
+    ${extra ? `<div class="meta"><span class="lbl">${extra[0]}:</span> ${esc(extra[1])}</div>` : ''}</div>
     <div class="actions"><button class="edit" data-act="edit">Edit</button><button class="del" data-act="delete">Delete</button></div>`;
 }
 
@@ -560,6 +638,7 @@ $('nextBtn').addEventListener('click', () => selectSlide(homeTarget + 1));
 
 document.addEventListener('keydown', e => {
   if (!document.body.classList.contains('home') || document.querySelector('dialog[open]')) return;
+  if (e.target.closest && e.target.closest('select, input, textarea')) return; // let the sort dropdown use its keys
   const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
   if (step) { e.preventDefault(); selectSlide(homeTarget + step); }
   else if (e.key === 'Home') selectSlide(0);
