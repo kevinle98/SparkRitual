@@ -129,11 +129,16 @@ dialog input { width: 100%; }
 .cmd-card:hover { border-color: var(--accent); }
 
 dialog.wide { width: 94vw; max-width: 2000px; height: 80vh; }
-.new-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr clamp(240px, 26vw, 560px); gap: 12px; }
-.new-body > div { overflow-y: auto; min-height: 0; }
+.new-body { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.new-body > div { overflow-y: auto; min-height: 0; min-width: 0; }
+.new-results { padding: 2px; }
 .new-preview { background: var(--panel2); border-radius: 8px; padding: 10px; }
-.new-preview img.art { width: 100%; border-radius: 4.5% / 3.2%; display: block; }
-.new-preview h2 { margin: 10px 0 2px; font-size: 19.2px; display: flex; justify-content: space-between; gap: 8px; }
+.new-preview .pv { display: flex; flex-direction: row-reverse; gap: 10px; height: 100%; min-height: 0; }
+.new-preview .pv-art { flex: 0 1 45%; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; }
+.new-preview img.art { width: auto; max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; border-radius: 4.5% / 3.2%; display: block; }
+.new-preview .flip { flex-shrink: 0; }
+.new-preview .pv-text { flex: 1; min-width: 0; overflow-y: auto; overflow-wrap: anywhere; }
+.new-preview h2 { margin: 0 0 2px; font-size: 19.2px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 .new-preview .type { color: var(--muted); margin-bottom: 6px; }
 .new-preview .rules { background: var(--panel); border-radius: 6px; padding: 6px 8px; }
 .new-preview dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; }
@@ -227,6 +232,10 @@ body.home #builder, body.home .builder-only, body:not(.home) #home { display: no
 @media (max-width: 700px) {
   .carousel-wrap { --w: clamp(150px, min(58vw, calc((100vh - 140px) / 2.23)), 460px); }
   .nav { font-size: 36px; width: 36px; }
+  .new-preview .pv { height: auto; flex-direction: column; }
+  .new-preview .pv-art { flex: none; }
+  .new-preview img.art { max-height: 35vh; }
+  .new-preview .pv-text { overflow: visible; }
 }
 
 @media (max-width: 1000px) {

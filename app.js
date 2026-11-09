@@ -125,7 +125,7 @@ const identitySymbols = ids => symbols(ids.length ? ids.map(x => `{${x}}`).join(
 
 /* ---------- Commander / partner rules ---------- */
 
-const hasKw = (c, k) => c.keywords.includes(k);
+const hasKw = (c, k) => c.keywords.some(keyword => keyword.toLowerCase() === k.toLowerCase());
 const isBackground = c => /\bBackground\b/.test(c.type_line);
 const isDoctor = c => /Time Lord Doctor/.test(c.type_line);
 const partnerWithName = c => hasKw(c, 'Partner with') ? (c.oracle_text.match(/Partner with ([^\n(]+)/) || [])[1]?.trim() : null;
@@ -334,34 +334,87 @@ function route() {
   if (m && decks[m[1]]) openDeck(m[1]); else showHome();
 }
 
-let homeList = [], homeSel = 0;
+let homeList = [], homeSel = 0, homeRadius = 0;
+const homeSlides = new Map();
+
+function createHomeSlide(i) {
+  const d = homeList[i];
+  const img = d.commanders[0] && d.commanders[0].faces[0].image;
+  const slide = document.createElement('div');
+  slide.className = 'slide';
+  slide.dataset.i = i;
+  slide.innerHTML = img ? `<img class="cover" src="${esc(img)}" alt="${esc(d.name)}"><div class="refl"><img src="${esc(img)}" alt=""></div>` : '<div class="cover blank"></div>';
+  return slide;
+}
+
+function updateHomeRadius() {
+  const carousel = $('carousel');
+  const slide = homeSlides.values().next().value;
+  const width = slide && parseFloat(getComputedStyle(slide).width);
+  if (width > 0) homeRadius = Math.ceil(carousel.clientWidth / width * 2) + 6;
+}
+
+function renderHomeSlides() {
+  const carousel = $('carousel');
+  const start = Math.max(0, homeSel - homeRadius);
+  const end = Math.min(homeList.length - 1, homeSel + homeRadius);
+  for (const [i, slide] of homeSlides) {
+    if (i < start || i > end) { slide.remove(); homeSlides.delete(i); }
+  }
+  for (let i = start; i <= end; i++) {
+    let slide = homeSlides.get(i);
+    if (!slide) {
+      slide = createHomeSlide(i);
+      homeSlides.set(i, slide);
+      const next = [...carousel.children].find(child => +child.dataset.i > i);
+      carousel.insertBefore(slide, next || null);
+    }
+    const o = i - homeSel, a = Math.abs(o), sign = Math.sign(o);
+    slide.classList.toggle('sel', o === 0);
+    slide.style.zIndex = 100 - a;
+    slide.style.transform = o === 0
+      ? 'translateZ(calc(var(--w) * .26))'
+      : `translateX(calc(${sign} * var(--w) * (0.75 + ${a - 1} * 0.3))) translateZ(calc(var(--w) * -.46)) rotateY(${-sign * 62}deg)`;
+  }
+}
 
 function renderHome() {
   homeList = Object.values(decks).sort((a, b) => b.updated - a.updated);
   homeSel = Math.max(0, Math.min(homeSel, homeList.length - 1));
-  const slides = homeList.map((d, i) => {
-    const img = d.commanders[0] && d.commanders[0].faces[0].image;
-    return `<div class="slide" data-i="${i}">${img ? `<img class="cover" src="${esc(img)}" alt="${esc(d.name)}"><div class="refl"><img src="${esc(img)}" alt=""></div>` : '<div class="cover blank"></div>'}</div>`;
-  });
-  $('carousel').innerHTML = slides.join('') || '<div class="empty">No saved decks yet. Click "New Deck" above to get started.</div>';
-  selectSlide(homeSel);
+  const carousel = $('carousel');
+  homeSlides.clear();
+  carousel.replaceChildren();
+  if (!homeList.length) {
+    carousel.innerHTML = '<div class="empty">No saved decks yet. Click "New Deck" above to get started.</div>';
+    $('deckInfo').innerHTML = '';
+    setMusic(null);
+    return;
+  }
+  const selected = createHomeSlide(homeSel);
+  homeSlides.set(homeSel, selected);
+  carousel.appendChild(selected);
+  updateHomeRadius();
+  renderHomeSlides();
+  renderInfo();
+  playDeckMusic();
 }
 
 // Cover Flow: the selected deck faces front, the rest fan out rotated and receding.
 function selectSlide(i) {
-  if (!homeList.length) { $('deckInfo').innerHTML = ''; setMusic(null); return; }
-  homeSel = Math.max(0, Math.min(i, homeList.length - 1));
-  [...$('carousel').children].forEach((s, k) => {
-    const o = k - homeSel, a = Math.abs(o), sign = Math.sign(o);
-    s.classList.toggle('sel', o === 0);
-    s.style.zIndex = 100 - a;
-    s.style.transform = o === 0
-      ? 'translateZ(calc(var(--w) * .26))'
-      : `translateX(calc(${sign} * var(--w) * (0.75 + ${a - 1} * 0.3))) translateZ(calc(var(--w) * -.46)) rotateY(${-sign * 62}deg)`;
-  });
+  if (!homeList.length) return;
+  const next = Math.max(0, Math.min(i, homeList.length - 1));
+  if (next === homeSel) return;
+  homeSel = next;
+  renderHomeSlides();
   renderInfo();
   playDeckMusic();
 }
+
+window.addEventListener('resize', () => {
+  if (!document.body.classList.contains('home') || !homeList.length) return;
+  updateHomeRadius();
+  renderHomeSlides();
+});
 
 function renderInfo() {
   const d = homeList[homeSel];
@@ -1206,6 +1259,11 @@ function showDraftPreview(card, face = 0) {
   $('newPreview').innerHTML = previewHtml(card, face, { identity: true });
 }
 
+function restoreDraftPreview() {
+  const selected = (draft.target === 'partner' && draft.partner) || draft.card;
+  if (selected && selected !== draft.shown) showDraftPreview(selected);
+}
+
 function updateDraftUi() {
   const canPartner = draft.card && pairQuery(draft.card) !== null;
   $('tabPartner').hidden = !canPartner;
@@ -1222,6 +1280,7 @@ function setDraftTarget(t) {
   draft.target = t;
   $('newSearch').value = '';
   updateDraftUi();
+  restoreDraftPreview();
   searchNewCommander();
 }
 
@@ -1267,6 +1326,11 @@ $('newResults').addEventListener('mouseover', e => {
   const row = e.target.closest('[data-id]');
   const c = row && cache.get(row.dataset.id);
   if (c && c !== draft.shown) showDraftPreview(c);
+});
+$('newResults').addEventListener('mouseout', e => {
+  const row = e.target.closest('[data-id]');
+  const nextRow = e.relatedTarget instanceof Element && e.relatedTarget.closest('[data-id]');
+  if (row && (!nextRow || !$('newResults').contains(nextRow))) restoreDraftPreview();
 });
 $('newResults').addEventListener('click', e => {
   const row = e.target.closest('[data-id]');
