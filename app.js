@@ -318,6 +318,7 @@ function showHome() {
   state.id = null;
   document.body.classList.add('home');
   homeSel = 0;
+  homeList = []; // start on the most recent deck rather than restoring the old selection
   renderHome();
 }
 
@@ -335,7 +336,10 @@ function route() {
 }
 
 let homeList = [], homeSel = 0, homeRadius = 0;
+// homeTarget is where navigation is heading; homeSel walks toward it one slot at a time.
+let homeTarget = 0, stepTimer = 0;
 const homeSlides = new Map();
+const STEP_MS = 160, CATCHUP_MS = 90; // pace for single steps vs. catching up on long jumps
 
 function createHomeSlide(i) {
   const d = homeList[i];
@@ -343,15 +347,24 @@ function createHomeSlide(i) {
   const slide = document.createElement('div');
   slide.className = 'slide';
   slide.dataset.i = i;
-  slide.innerHTML = img ? `<img class="cover" src="${esc(img)}" alt="${esc(d.name)}"><div class="refl"><img src="${esc(img)}" alt=""></div>` : '<div class="cover blank"></div>';
+  slide.innerHTML = img ? `<img class="cover" src="${esc(img)}" alt="${esc(d.name)}" decoding="async" draggable="false"><div class="refl"><img src="${esc(img)}" alt="" decoding="async" draggable="false"></div>` : '<div class="cover blank"></div>';
   return slide;
 }
 
+// Side slides sit 0.3 card-widths apart, so only about half the carousel width / (0.3 * width)
+// of them are visible per side. Keeping more alive just costs GPU layers.
 function updateHomeRadius() {
   const carousel = $('carousel');
   const slide = homeSlides.values().next().value;
   const width = slide && parseFloat(getComputedStyle(slide).width);
-  if (width > 0) homeRadius = Math.ceil(carousel.clientWidth / width * 2) + 6;
+  if (width > 0 && carousel.clientWidth > 0) homeRadius = Math.ceil(carousel.clientWidth / 2 / (width * 0.3)) + 2;
+  else homeRadius = 8;
+}
+
+function stopStepping() {
+  clearTimeout(stepTimer);
+  stepTimer = 0;
+  homeTarget = homeSel;
 }
 
 function renderHomeSlides() {
@@ -371,22 +384,47 @@ function renderHomeSlides() {
     }
     const o = i - homeSel, a = Math.abs(o), sign = Math.sign(o);
     slide.classList.toggle('sel', o === 0);
-    slide.style.zIndex = 100 - a;
+    if (!slide.style.zIndex) slide.style.zIndex = 100 - a; // new slides only; restack() owns it after that
     slide.style.transform = o === 0
       ? 'translateZ(calc(var(--w) * .26))'
       : `translateX(calc(${sign} * var(--w) * (0.75 + ${a - 1} * 0.3))) translateZ(calc(var(--w) * -.46)) rotateY(${-sign * 62}deg)`;
   }
+  trackStacking();
+}
+
+// Stacking follows where each card actually is on screen, not a timed z-index transition.
+// A timed transition makes neighbours briefly share a z-index mid-step; the browser then breaks
+// the tie by DOM order, which always favours the right-hand card, so scrolling left made the
+// outgoing card flicker in front. Here, every frame while cards move, the card nearest the
+// centre is on top, then the next nearest, and so on.
+let zFrame = 0, zUntil = 0;
+function trackStacking() {
+  zUntil = performance.now() + 650; // a little past the 450ms transition
+  if (!zFrame) zFrame = requestAnimationFrame(restack);
+}
+function restack() {
+  const c = $('carousel').getBoundingClientRect(), cx = c.left + c.width / 2;
+  [...homeSlides.values()]
+    .map(el => { const r = el.getBoundingClientRect(); return [el, Math.abs(r.left + r.width / 2 - cx)]; })
+    .sort((a, b) => a[1] - b[1])
+    .forEach(([el], k) => { const z = String(100 - k); if (el.style.zIndex !== z) el.style.zIndex = z; });
+  zFrame = performance.now() < zUntil && homeSlides.size ? requestAnimationFrame(restack) : 0;
 }
 
 function renderHome() {
+  // Keep the same deck selected even if a sync or edit re-sorted the list.
+  const keepId = homeList[homeSel] && homeList[homeSel].id;
   homeList = Object.values(decks).sort((a, b) => b.updated - a.updated);
-  homeSel = Math.max(0, Math.min(homeSel, homeList.length - 1));
+  const kept = keepId ? homeList.findIndex(d => d.id === keepId) : -1;
+  homeSel = Math.max(0, Math.min(kept >= 0 ? kept : homeSel, homeList.length - 1));
+  stopStepping();
   const carousel = $('carousel');
   homeSlides.clear();
   carousel.replaceChildren();
   if (!homeList.length) {
     carousel.innerHTML = '<div class="empty">No saved decks yet. Click "New Deck" above to get started.</div>';
     $('deckInfo').innerHTML = '';
+    $('prevBtn').disabled = $('nextBtn').disabled = true;
     setMusic(null);
     return;
   }
@@ -400,27 +438,54 @@ function renderHome() {
 }
 
 // Cover Flow: the selected deck faces front, the rest fan out rotated and receding.
+// Every move is a single-slot step so z-index layering always animates in order;
+// long jumps and key repeat just push the target further and the carousel walks to it.
 function selectSlide(i) {
   if (!homeList.length) return;
-  const next = Math.max(0, Math.min(i, homeList.length - 1));
-  if (next === homeSel) return;
-  homeSel = next;
+  homeTarget = Math.max(0, Math.min(i, homeList.length - 1));
+  if (!stepTimer) stepToward();
+}
+
+function stepToward() {
+  if (!document.body.classList.contains('home') || homeTarget === homeSel) { stepTimer = 0; return; }
+  const far = Math.abs(homeTarget - homeSel) > 1;
+  homeSel += Math.sign(homeTarget - homeSel);
   renderHomeSlides();
   renderInfo();
   playDeckMusic();
+  stepTimer = setTimeout(stepToward, far ? CATCHUP_MS : STEP_MS);
 }
 
+// While resizing, slide positions track --w instantly instead of easing behind the window.
+let resizeEnd = 0, resizeFrame = 0;
 window.addEventListener('resize', () => {
   if (!document.body.classList.contains('home') || !homeList.length) return;
-  updateHomeRadius();
-  renderHomeSlides();
+  const carousel = $('carousel');
+  carousel.classList.add('resizing');
+  clearTimeout(resizeEnd);
+  resizeEnd = setTimeout(() => carousel.classList.remove('resizing'), 150);
+  if (resizeFrame) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0;
+    updateHomeRadius();
+    renderHomeSlides();
+  });
 });
+
+const bracketCache = new Map();
+function deckBracket(d) {
+  const key = `${d.id}:${d.updated}`;
+  if (!bracketCache.has(key)) bracketCache.set(key, estimateBracket(d.commanders, d.cards));
+  return bracketCache.get(key);
+}
 
 function renderInfo() {
   const d = homeList[homeSel];
+  $('prevBtn').disabled = homeSel === 0;
+  $('nextBtn').disabled = homeSel === homeList.length - 1;
   const names = d.commanders.map(c => c.name).join(' + ');
   const ids = [...new Set(d.commanders.flatMap(c => c.color_identity))];
-  const br = estimateBracket(d.commanders, d.cards);
+  const br = deckBracket(d);
   $('deckInfo').innerHTML = `<div class="info-text"><div class="title">${esc(d.name)}</div>
     <div class="meta"><span class="lbl">Commander:</span> ${esc(names)}</div>
     <div class="meta"><span class="lbl">Bracket:</span> ${br.level}</div>
@@ -434,6 +499,7 @@ function activateSlide() {
 }
 
 $('carousel').addEventListener('click', e => {
+  if (swipeSuppressClick) { swipeSuppressClick = false; return; }
   const s = e.target.closest('.slide');
   if (!s) return;
   if (+s.dataset.i === homeSel) activateSlide(); else selectSlide(+s.dataset.i);
@@ -451,21 +517,51 @@ $('deckInfo').addEventListener('click', e => {
   }
 });
 
-let wheelLock = 0;
+// Wheel: always consume the event (no page scroll or swipe-back leaking through),
+// normalize line/page deltas to pixels, and accumulate so one flick moves a predictable amount.
+const WHEEL_STEP_PX = 60;
+let wheelAcc = 0, wheelIdle = 0;
 $('carousel').addEventListener('wheel', e => {
-  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-  if (Math.abs(d) < 10 || Date.now() < wheelLock) return;
   e.preventDefault();
-  wheelLock = Date.now() + 150;
-  selectSlide(homeSel + Math.sign(d));
+  const k = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1;
+  const d = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) * k;
+  clearTimeout(wheelIdle);
+  wheelIdle = setTimeout(() => { wheelAcc = 0; }, 120);
+  if (Math.sign(d) !== Math.sign(wheelAcc)) wheelAcc = 0; // direction change starts fresh
+  wheelAcc += d;
+  if (Math.abs(wheelAcc) >= WHEEL_STEP_PX) {
+    selectSlide(homeTarget + Math.sign(wheelAcc));
+    wheelAcc = 0;
+  }
 }, { passive: false });
-$('prevBtn').addEventListener('click', () => selectSlide(homeSel - 1));
-$('nextBtn').addEventListener('click', () => selectSlide(homeSel + 1));
+
+// Swipe / drag: horizontal movement past a threshold steps through decks.
+let swipe = null, swipeSuppressClick = false;
+$('carousel').addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  swipe = { x: e.clientX, y: e.clientY, id: e.pointerId };
+});
+$('carousel').addEventListener('pointerup', e => {
+  if (!swipe || swipe.id !== e.pointerId) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  swipe = null;
+  if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+  swipeSuppressClick = true; // the click that follows a drag shouldn't open/select a slide
+  setTimeout(() => { swipeSuppressClick = false; }, 0);
+  const slide = homeSlides.get(homeSel);
+  const spacing = (slide ? slide.offsetWidth : 200) * 0.3;
+  const steps = Math.max(1, Math.round(Math.abs(dx) / Math.max(spacing, 60)));
+  selectSlide(homeTarget - Math.sign(dx) * steps);
+});
+$('carousel').addEventListener('pointercancel', () => { swipe = null; });
+
+$('prevBtn').addEventListener('click', () => selectSlide(homeTarget - 1));
+$('nextBtn').addEventListener('click', () => selectSlide(homeTarget + 1));
 
 document.addEventListener('keydown', e => {
   if (!document.body.classList.contains('home') || document.querySelector('dialog[open]')) return;
   const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-  if (step) { e.preventDefault(); selectSlide(homeSel + step); }
+  if (step) { e.preventDefault(); selectSlide(homeTarget + step); }
   else if (e.key === 'Home') selectSlide(0);
   else if (e.key === 'End') selectSlide(homeList.length - 1);
   else if (e.key === 'Enter' && !e.target.closest('button')) activateSlide();
@@ -1103,7 +1199,7 @@ const playDeckMusic = debounce(() => {
   if (!document.body.classList.contains('home')) return;
   const d = homeList[homeSel];
   setMusic(d && d.music ? ytId(d.music) : null);
-}, 400);
+}, 600); // longer than the 450ms slide transition so YouTube loading never lands mid-animation
 
 $('musicToggle').addEventListener('click', () => {
   if (!ytReady) return;

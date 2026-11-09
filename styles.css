@@ -153,12 +153,16 @@ dialog.wide { width: 94vw; max-width: 2000px; height: 80vh; }
 /* landing page */
 body.home #builder, body.home .builder-only, body:not(.home) #home { display: none; }
 .topbar h1 a { color: inherit; text-decoration: none; }
-.home-page { position: relative; --floor: #171618; flex: 1; min-height: 0; overflow-y: auto; display: flex; background: var(--floor); }
+.home-page { position: relative; --floor: #171618; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; background: var(--floor); }
 .home-inner { width: 100%; display: flex; align-items: center; }
 .carousel-wrap { --w: clamp(180px, min(26vw, calc((100vh - 80px) / 2.23)), 460px); --h: calc(var(--w) * 1.393); --top: calc(var(--h) * 0.1 + 24px); position: relative; flex: 1; min-width: 0; }
 .carousel { position: relative; height: calc(var(--h) * 1.5 + var(--top)); overflow: hidden; perspective: calc(var(--w) * 3.7); perspective-origin: 50% calc(var(--h) + var(--top)); background: var(--floor); }
 .carousel::after { content: ''; position: absolute; left: 0; right: 0; top: calc(var(--h) + var(--top)); bottom: 0; background: linear-gradient(rgba(255, 255, 255, 0.062), rgba(255,255,255,.01) 45%, transparent); border-top: 1px solid rgba(255, 255, 255, 0.082); pointer-events: none; z-index: 100; }
-.slide { position: absolute; top: var(--top); left: 50%; width: var(--w); margin-left: calc(var(--w) / -2); cursor: pointer; will-change: transform; filter: brightness(.6); transition: transform .45s cubic-bezier(.2,.7,.2,1), filter .45s; }
+/* z-index is not transitioned: restack() in app.js sets it each frame from the cards' real positions. */
+.slide { position: absolute; top: var(--top); left: 50%; width: var(--w); margin-left: calc(var(--w) / -2); cursor: pointer; will-change: transform; filter: brightness(.6); transition: transform .45s cubic-bezier(.2,.7,.2,1), filter .45s; user-select: none; -webkit-user-drag: none; }
+.carousel { touch-action: pan-y; }
+.carousel.resizing .slide { transition: none; }
+@media (prefers-reduced-motion: reduce) { .slide { transition: none; } }
 .slide.sel { filter: none; }
 .slide .cover { width: 100%; aspect-ratio: 488 / 680; object-fit: cover; border-radius: 4.5% / 3.2%; display: block; }
 /* Opaque mirror that fades to the floor color, so overlapping reflections occlude rather than blend. */
