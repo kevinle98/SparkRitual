@@ -8,13 +8,18 @@
 <link rel="preconnect" href="https://svgs.scryfall.io">
 <title>SparkRitual - Commander Deck Builder</title>
 <link rel="icon" type="image/svg+xml" href="logo.svg">
+<script>/* Apply the saved theme before first paint so light mode doesn't flash dark. Dark is the default. */
+try { if (localStorage.getItem('sparkritual.theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}</script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body class="home">
 <header class="topbar">
-  <h1><a href="#"><img class="logo" src="logo.svg" alt="">SparkRitual</a></h1>
+  <button id="menuBtn" class="menu-btn" aria-label="Open menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="sideNav">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+  </button>
+  <h1><a href="#"><img class="logo" src="logo.svg" alt=""><span class="brand-text">SparkRitual</span></a></h1>
   <span id="deckTitle" class="deck-title builder-only"></span>
-  <div class="spacer"></div>
+  <input id="deckNameInput" class="deck-name-input builder-only" type="text" maxlength="100" spellcheck="false" autocomplete="off" aria-label="Deck name" title="Click to rename">  <div class="spacer"></div>
   <label class="builder-only">Sort
     <select id="sortSelect">
       <option value="type" selected>Card Type</option>
@@ -28,7 +33,6 @@
   <button id="listBtn" class="builder-only">Import / Export</button>
   <span id="syncState" class="sync builder-only"></span>
   <button id="copyBtn" class="shared-only">Copy to my decks</button>
-  <button id="authBtn" hidden>Sign in</button>
   <label class="home-only">View
     <select id="homeView">
       <option value="carousel" selected>Carousel</option>
@@ -48,7 +52,6 @@
     </select>
   </label>
   <button id="homeSortDir" class="home-only" title="Reverse sort order" aria-label="Reverse sort order"></button>
-  <button id="newBtn">New Deck</button>
 </header>
 
 <main class="home-page" id="home" data-view="carousel">
@@ -113,7 +116,7 @@
 
 <dialog id="cmdDialog">
   <div class="dialog-head">
-    <h2>Choose Partner / Background</h2>
+    <h2 id="cmdTitle">Choose Partner / Background</h2>
     <button id="cmdClose">Close</button>
   </div>
   <input id="cmdInput" type="search" placeholder="Search by name">
@@ -219,6 +222,47 @@
     <button id="newImportClear">Clear</button>
     <button id="newImportApply" class="apply">Add to New Deck</button>
   </div>
+</dialog>
+
+<dialog id="sideNav" class="side-nav" aria-label="Menu">
+  <nav class="side-nav-inner">
+    <div class="side-nav-head">
+      <span class="side-nav-brand"><img class="logo" src="logo.svg" alt=""><span class="brand-text">SparkRitual</span></span>
+      <button id="sideNavClose" class="menu-btn" aria-label="Close menu">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
+      </button>
+    </div>
+    <button id="newBtn" class="side-nav-item">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>New Deck</button>
+    <button id="authBtn" class="side-nav-item" hidden>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.2"/><path d="M3.5 17c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/></svg><span id="authLabel">Log in</span></button>
+    <div class="side-nav-spacer"></div>
+    <button id="aboutBtn" class="side-nav-item">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.2" r=".6" fill="currentColor"/></svg>About</button>
+    <button id="appSettingsBtn" class="side-nav-item">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
+  </nav>
+</dialog>
+
+<dialog id="aboutDialog">
+  <div class="dialog-head">
+    <h2>About SparkRitual</h2>
+    <button id="aboutClose">Close</button>
+  </div>
+  <div class="about">
+    <p class="about-tag">Made <strong>by</strong> players, <strong>for</strong> players.</p>
+    <p>SparkRitual is a Commander deck builder from people who sleeve up every week. We built the tool we wanted at our own tables: fast card search that knows your commander's color identity, an honest bracket estimate before Rule Zero talks, test hands to see how a deck opens, and a little music to brew to.</p>
+    <p>There's no paywall and no ads. Brew, tinker, share your decks, and get back to playing.</p>
+    <p class="about-fine">Card data and images courtesy of <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>. SparkRitual is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. &copy;Wizards of the Coast LLC.</p>
+  </div>
+</dialog>
+
+<dialog id="appSettingsDialog">
+  <div class="dialog-head">
+    <h2>Settings</h2>
+    <button id="appSettingsClose">Close</button>
+  </div>
+  <label class="setting-row"><input id="darkModeToggle" type="checkbox" checked> Dark mode</label>
 </dialog>
 
 <dialog id="authDialog">

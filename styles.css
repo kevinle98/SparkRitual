@@ -1,6 +1,21 @@
 :root {
   --bg: #0f0c13; --panel: #17151b; --panel2: #231e27; --line: #4d4755;
   --text: #eee6eef3; --muted: #aa9caf; --accent: #844aa5; --bad: #e19591; --ok: #3fb950;
+  --floor: #171618; --gc: #e0b43c;
+  --overlay: rgba(255, 255, 255, .08); --overlay-line: rgba(255, 255, 255, .28); --hairline: rgba(255, 255, 255, .05);
+  --floor-glow: rgba(255, 255, 255, .062); --floor-glow-end: rgba(255, 255, 255, .01); --floor-line: rgba(255, 255, 255, .082);
+  --ghost: #3d3a41; --ghost-line: #6a6570; --text-shadow: 0 1px 4px rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}
+/* Light theme: Settings > Dark mode unticked sets data-theme="light" on <html>. */
+:root[data-theme="light"] {
+  --bg: #f4f1f6; --panel: #ffffff; --panel2: #ece6f0; --line: #cdc4d4;
+  --text: #1f1a24; --muted: #6b6172; --accent: #844aa5; --bad: #b3261e; --ok: #1a7f37;
+  --floor: #e8e5eb; --gc: #9a6b00;
+  --overlay: rgba(0, 0, 0, .05); --overlay-line: rgba(0, 0, 0, .25); --hairline: rgba(0, 0, 0, .07);
+  --floor-glow: rgba(0, 0, 0, .04); --floor-glow-end: rgba(0, 0, 0, .01); --floor-line: rgba(0, 0, 0, .1);
+  --ghost: #f3f0f6; --ghost-line: #b8afc0; --text-shadow: none;
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -14,8 +29,42 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 .topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .topbar h1 { font-size: 20px; margin: 0; color: var(--accent); }
-.deck-title { font-weight: 400; font-size: 20px; max-width: 50vw; }
-.spacer { flex: 1; }
+/* Hamburger button left of the logo; opens the full-height side panel (#sideNav). */
+.menu-btn { width: 36px; height: 36px; padding: 0; flex: none; border-color: transparent; background: none; }
+.menu-btn[aria-expanded="true"] { background: var(--panel2); border-color: var(--line); }
+.menu-btn svg, .side-nav svg { stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+.menu-btn svg { width: 20px; height: 20px; }
+dialog.side-nav { position: fixed; inset: 0 auto 0 0; margin: 0; width: min(300px, 85vw); height: 100%; max-height: none; max-width: none; padding: 0; border: 0; border-right: 1px solid var(--line); border-radius: 0; box-shadow: 8px 0 32px rgba(0,0,0,.5); }
+dialog.side-nav[open] { display: flex; animation: side-nav-in .22s cubic-bezier(.2,.7,.2,1); }
+@keyframes side-nav-in { from { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { dialog.side-nav[open] { animation: none; } }
+.side-nav-inner { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 10px 10px 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); overflow-y: auto; }
+.side-nav-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 10px 6px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.side-nav-brand { display: inline-flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; color: var(--accent); }
+.side-nav-brand .logo { height: 1.2em; width: auto; }
+.side-nav-item { justify-content: flex-start; gap: 12px; padding: 10px 12px; border: 0; border-radius: 6px; background: none; text-align: left; }
+.side-nav-item:hover:not(:disabled), .side-nav-item:focus-visible { background: var(--panel2); outline: none; }
+.side-nav-item svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.side-nav-spacer { flex: 1; }
+#appSettingsDialog { width: min(460px, 94vw); }
+#aboutDialog { width: min(560px, 94vw); }
+.about { overflow-y: auto; line-height: 1.55; }
+.about p { margin: 0 0 12px; }
+.about-tag { font-size: 22px; font-weight: 700; color: var(--accent); }
+.about-tag strong { font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.about-fine { margin-top: 18px !important; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.about-fine a { color: inherit; }
+.setting-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px; cursor: pointer; }
+.setting-row input[type="checkbox"] { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--accent); cursor: pointer; }
+.topbar h1 { display: flex; align-items: center; line-height: 1; }
+.deck-title { position: relative; top: -.065em; font-weight: 400; font-size: 20px; line-height: 1.2; max-width: 50vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Your own deck: the name is an inline input that looks like plain text until hovered or focused. */
+body:not(.shared) #deckTitle, body.shared #deckNameInput { display: none; }
+/* Inputs can't use text-box trimming, and the system font's ascender/descender space leaves the letters
+   ~0.065em below the box centre, so shift the text up by that much (box size unchanged) to line up with the logo. */
+.deck-name-input { font-size: 20px; line-height: 1.2; padding: calc(3px - .065em) 8px calc(3px + .065em); margin-left: -9px; border-color: transparent; background: none; min-width: 6ch; max-width: 50vw; text-overflow: ellipsis; }
+.deck-name-input:hover { border-color: var(--line); }
+.deck-name-input:focus { border-color: var(--accent); background: var(--panel2); outline: none; }.spacer { flex: 1; }
 .topbar label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
 
 .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: min(40vw, calc(52vh * 0.7176 + 56px)) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; gap: 10px; padding: 10px; }
@@ -49,14 +98,17 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* commander slots */
 .slots { display: flex; flex-direction: column; gap: 6px; }
 .slot { display: flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px dashed var(--line); border-radius: 6px; padding: 6px 8px; min-height: 36px; }
-.slot.filled { border-style: solid; }
+.slot.filled { border-style: solid; cursor: pointer; }
+.slot.filled.sel { border-color: var(--accent); outline: 1px solid var(--accent); }
 .slot .nm { flex: 1; font-weight: 600; }
 .slot .label { color: var(--muted); font-size: 14.4px; }
 .slot button { padding: 2px 8px; }
+.slot .x-btn { width: 26px; height: 26px; padding: 0; flex: none; }
+.x-btn svg { width: 10px; height: 10px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
 
 .status { margin: 10px 0; padding: 6px 10px; border-radius: 6px; background: var(--panel2); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .status .ok { color: var(--ok); } .status .bad { color: var(--bad); }
-.gc { color: #e0b43c; font-size: 14.4px; cursor: help; }
+.gc { color: var(--gc); font-size: 14.4px; cursor: help; }
 
 .group h3 { margin: 12px 0 4px; font-size: 15.6px; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 2px; }
 .row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 4px; cursor: default; }
@@ -152,19 +204,23 @@ dialog.wide { width: 94vw; max-width: 2000px; height: 80vh; }
 
 /* landing page */
 body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.home) .home-only { display: none; }
-#homeSortDir { min-width: 34px; padding-left: 8px; padding-right: 8px; margin-left: -6px; }
+#homeSortDir { min-width: 34px; padding-left: 8px; padding-right: 8px; margin-left: -6px; align-self: stretch; }
+.sort-icon { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; fill: none; }
 .topbar h1 a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
 .topbar h1 .logo { height: 1.2em; width: auto; display: block; }
-.home-page { position: relative; --floor: #171618; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; background: var(--floor); }
+/* Trim the text box to cap height..baseline so flex centering lines the logo up with the letters,
+   not with the font's ascender/descender space. (Chromium/Safari; others fall back to box centering.) */
+.brand-text { display: block; line-height: 1; text-box: trim-both cap alphabetic; }
+.home-page { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; background: var(--floor); }
 .home-inner { width: 100%; display: flex; align-items: stretch; }
-.carousel-wrap { --w: clamp(180px, min(58vw, calc((100vh - 80px) / 2.23)), 460px); --h: calc(var(--w) * 1.393); --top: calc(var(--h) * 0.1 + 24px);
+.carousel-wrap { --w: max(180px, min(58vw, calc((100vh - 80px) / 2.23))); --h: calc(var(--w) * 1.393); --top: calc(var(--h) * 0.1 + 24px);
   /* Card top edge: vertically centered in the stage, but never higher than --top and always leaving at least
      half a card of floor below for the deck info. Percentages resolve against the stage height at each use. */
   --card-top: max(var(--top), min(50% - var(--h) / 2, 100% - var(--h) * 1.5));
   position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* The stage fills the page height: cards sit at --card-top and the floor runs from under them to the bottom. */
 .carousel { position: relative; flex: 1 0 auto; min-height: calc(var(--h) * 1.5 + var(--top)); overflow: hidden; perspective: calc(var(--w) * 3.7); perspective-origin: 50% calc(var(--card-top) + var(--h)); background: var(--floor); }
-.carousel::after { content: ''; position: absolute; left: 0; right: 0; top: calc(var(--card-top) + var(--h)); bottom: 0; background: linear-gradient(rgba(255, 255, 255, 0.062), rgba(255,255,255,.01) 45%, transparent); border-top: 1px solid rgba(255, 255, 255, 0.082); pointer-events: none; z-index: 100; }
+.carousel::after { content: ''; position: absolute; left: 0; right: 0; top: calc(var(--card-top) + var(--h)); bottom: 0; background: linear-gradient(var(--floor-glow), var(--floor-glow-end) 45%, transparent); border-top: 1px solid var(--floor-line); pointer-events: none; z-index: 100; }
 /* z-index is not transitioned: restack() in app.js sets it each frame from the cards' real positions. */
 .slide { position: absolute; top: var(--card-top); left: 50%; width: var(--w); margin-left: calc(var(--w) / -2); cursor: pointer; will-change: transform; filter: brightness(.6); transition: transform .45s cubic-bezier(.2,.7,.2,1), filter .45s; user-select: none; -webkit-user-drag: none; }
 .carousel { touch-action: pan-y; }
@@ -178,11 +234,17 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 .slide .refl::after { content: ''; position: absolute; inset: 0; background: linear-gradient(var(--floor) 42%, color-mix(in srgb, var(--floor) 60%, transparent)); }
 .slide .blank { background: var(--panel); border: 2px dashed var(--line); }
 /* Empty-state placeholder shown in the selected slot when there are no decks. */
-.slide.placeholder .cover.blank { display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; background: rgba(255, 255, 255, .03); border-color: rgba(255, 255, 255, .18); color: var(--muted); font-size: calc(var(--w) * .065); line-height: 1.35; padding: 0 10%; transition: border-color .2s, color .2s; }
+.slide.placeholder .cover.blank { display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; background: var(--overlay); border-color: var(--overlay-line); color: var(--muted); font-size: calc(var(--w) * .065); line-height: 1.35; padding: 0 10%; transition: border-color .2s, color .2s; }
 .slide.placeholder:hover .cover.blank, .slide.placeholder:focus-visible .cover.blank { border-color: var(--accent); color: var(--text); }
 .slide.placeholder:focus-visible { outline: none; }
-.slide.placeholder .refl .blank { width: 100%; height: 100%; box-sizing: border-box; border-radius: inherit; }
-.deck-info { position: absolute; left: 0; right: 0; padding-left: calc(var(--w) * .16); top: calc(var(--card-top) + var(--h)); bottom: 0; z-index: 250; text-align: left; display: flex; align-items: center; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.slide.placeholder .refl .blank, .slide.ghost .refl .blank { width: 100%; height: 100%; box-sizing: border-box; border-radius: inherit; }
+/* Decorative empty decks beside the empty-state placeholder; not interactive. */
+.slide.ghost { pointer-events: none; cursor: default; }
+/* Side slides are dimmed by brightness(.6), so this lighter grey lands as a dark grey on screen. */
+.slide.ghost .cover.blank, .slide.ghost .refl .blank { box-sizing: border-box; background: var(--ghost); border-color: var(--ghost-line); }
+.plus-icon { width: 28%; height: auto; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; fill: none; }
+.deck-info .title.muted { color: var(--muted); }
+.deck-info { position: absolute; left: 0; right: 0; padding-left: calc(var(--w) * .16); top: calc(var(--card-top) + var(--h)); bottom: 0; z-index: 250; text-align: left; display: flex; align-items: center; pointer-events: none; text-shadow: var(--text-shadow); }
 .deck-info .info-text { display: flex; flex-direction: column; gap: calc(var(--w) * .013); min-width: 0; }
 .deck-info .title { font-weight: 700; font-size: calc(var(--w) * .09); margin-bottom: calc(var(--w) * .013); }
 .deck-info .meta { font-size: calc(var(--w) * .06); }
@@ -190,7 +252,7 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 .deck-info .title-row .title { margin-bottom: 0; min-width: 0; overflow-wrap: anywhere; }
 /* "⋯" deck options button, used in every landing view; the menu it opens is the shared .deck-menu. */
 .opts-btn { flex-shrink: 0; font-size: 20px; line-height: 1; padding: .05em .3em; border: 0; background: none; color: var(--muted); }
-.opts-btn:hover, .opts-btn[aria-expanded="true"] { color: var(--text); background: rgba(255, 255, 255, .08); }
+.opts-btn:hover, .opts-btn[aria-expanded="true"] { color: var(--text); background: var(--overlay); }
 .deck-info .opts-btn { font-size: calc(var(--w) * .07); pointer-events: auto; text-shadow: inherit; }
 .deck-menu { padding: 3px; min-width: 110px; }
 .deck-menu button { font-size: 14px; padding: 5px 10px; border-radius: 4px; }
@@ -208,7 +270,7 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 .tile-art:hover, .tile-art:focus-visible { transform: translateY(-4px); box-shadow: 0 10px 24px rgba(0, 0, 0, .55); outline: none; }
 .tile-art img, .tile-art .blank { width: 100%; aspect-ratio: 488 / 680; object-fit: cover; display: block; }
 .tile-art .blank { background: var(--panel); border: 2px dashed var(--line); border-radius: inherit; }
-.tile-art.placeholder { aspect-ratio: 488 / 680; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 10%; line-height: 1.35; color: var(--muted); background: rgba(255, 255, 255, .03); border: 2px dashed rgba(255, 255, 255, .18); }
+.tile-art.placeholder { aspect-ratio: 488 / 680; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 10%; line-height: 1.35; color: var(--muted); background: var(--overlay); border: 2px dashed var(--overlay-line); }
 .tile-art.placeholder:hover, .tile-art.placeholder:focus-visible { border-color: var(--accent); color: var(--text); transform: none; box-shadow: none; }
 .tile-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; }
 .tile-text { flex: 1; min-width: 0; }
@@ -226,7 +288,7 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 .deck-table th button { width: 100%; justify-content: flex-start; gap: 4px; padding: 10px 12px; border: 0; border-radius: 0; background: none; color: var(--muted); font-weight: 600; }
 .deck-table th button:hover { color: var(--text); }
 .deck-table th[aria-sort="ascending"] button, .deck-table th[aria-sort="descending"] button { color: var(--text); }
-.deck-table td { padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, .05); white-space: nowrap; }
+.deck-table td { padding: 8px 12px; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
 .deck-table tbody tr[data-i] { cursor: pointer; }
 .deck-table tbody tr[data-i]:hover td { background: var(--panel2); }
 .deck-table tbody tr.sel td { background: var(--panel2); }
@@ -295,7 +357,7 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 #prevBtn { left: 16px; } #nextBtn { right: 16px; }
 
 @media (max-width: 700px) {
-  .carousel-wrap { --w: clamp(150px, min(58vw, calc((100vh - 140px) / 2.23)), 460px); }
+  .carousel-wrap { --w: max(150px, min(58vw, calc((100vh - 140px) / 2.23))); }
   .nav { font-size: 36px; width: 36px; }
   .topbar { flex-wrap: wrap; row-gap: 8px; }
   .gallery-view { gap: 20px 14px; padding: 16px; }

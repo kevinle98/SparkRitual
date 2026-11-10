@@ -411,6 +411,9 @@ function restack() {
   zFrame = performance.now() < zUntil && homeSlides.size ? requestAnimationFrame(restack) : 0;
 }
 
+const EMPTY_GHOSTS = 8; // decorative empty decks per side when there are no decks
+const PLUS_ICON = '<svg class="plus-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5"/><path d="M12 7v10M7 12h10"/></svg>';
+
 function renderHome() {
   // Keep the same deck selected even if a sync or edit re-sorted the list.
   const keepId = homeList[homeSel] && homeList[homeSel].id;
@@ -427,11 +430,23 @@ function renderHome() {
   if (homeView === 'gallery') return renderGallery();
   if (homeView === 'list') return renderList();
   if (!homeList.length) {
-    // Empty card where the first deck will appear; it goes away as soon as a deck exists.
-    carousel.innerHTML = `<div class="slide sel placeholder" role="button" tabindex="0" style="transform: translateZ(calc(var(--w) * .26))">
-      <div class="cover blank"><span>Create a New Deck<br>to get started</span></div>
+    // Empty card where the first deck will appear, flanked by decorative empty decks so the
+    // carousel doesn't look bare. Only the centre card is clickable; all go away once a deck exists.
+    const ghosts = [];
+    for (let a = EMPTY_GHOSTS; a >= 1; a--) {
+      for (const sign of [-1, 1]) {
+        ghosts.push(`<div class="slide ghost" aria-hidden="true" style="z-index: ${100 - a}; transform: translateX(calc(${sign} * var(--w) * (0.75 + ${a - 1} * 0.3))) translateZ(calc(var(--w) * -.46)) rotateY(${-sign * 62}deg)">
+          <div class="cover blank"></div><div class="refl"><div class="blank"></div></div></div>`);
+      }
+    }
+    carousel.innerHTML = ghosts.join('') + `<div class="slide sel placeholder" role="button" tabindex="0" aria-label="Create a new deck" title="Create a new deck" style="z-index: 100; transform: translateZ(calc(var(--w) * .26))">
+      <div class="cover blank">${PLUS_ICON}</div>
       <div class="refl"><div class="blank"></div></div></div>`;
     $('prevBtn').disabled = $('nextBtn').disabled = true;
+    $('deckInfo').innerHTML = `<div class="info-text"><div class="title-row"><div class="title muted">No decks created.</div></div>
+      <div class="meta"><span class="lbl">Commander:</span> --</div>
+      <div class="meta"><span class="lbl">Bracket:</span> --</div>
+      <div class="meta"><span class="lbl">Color Identity:</span> --</div></div>`;
     setMusic(null);
     return;
   }
@@ -541,12 +556,17 @@ function sortDecks(list) {
   return list.sort((a, b) => dir * s.cmp(a, b) || cmpText(a.name || '', b.name || '') || (a.id < b.id ? -1 : 1));
 }
 
+// Arrow beside bars that grow (ascending) or shrink (descending) in the direction of the arrow.
+const SORT_ASC_ICON = '<svg class="sort-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V4M3 8l4-4 4 4M12 7h3M12 12h6M12 17h9"/></svg>';
+const SORT_DESC_ICON = '<svg class="sort-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M12 7h9M12 12h6M12 17h3"/></svg>';
+
 function showHomeSort() {
   const s = HOME_SORTS[homeSort.key];
   const desc = !!s.desc !== homeSort.reversed;
   $('homeSort').value = homeSort.key;
-  $('homeSortDir').textContent = desc ? '↓' : '↑';
+  $('homeSortDir').innerHTML = desc ? SORT_DESC_ICON : SORT_ASC_ICON;
   $('homeSortDir').title = `${desc ? 'Descending' : 'Ascending'}: click to reverse`;
+  $('homeSortDir').setAttribute('aria-label', `Sort order: ${desc ? 'descending' : 'ascending'}. Click to reverse`);
 }
 
 function setHomeSort(key, reversed) {
@@ -665,7 +685,7 @@ function renderGallery() {
         <div class="tile-row"><div class="tile-text"><div class="tile-name">${esc(d.name)}</div><div class="tile-sub">${esc(commanderName(d))}</div></div>${optsBtn(d)}</div>
       </div>`;
     }).join('')
-    : '<div class="tile"><button class="tile-art placeholder" data-new><span>Create a New Deck<br>to get started</span></button></div>';
+    : `<div class="tile"><button class="tile-art placeholder" data-new aria-label="Create a new deck" title="Create a new deck">${PLUS_ICON}</button></div>`;
 }
 
 // Columns map onto the sort keys, so clicking a header sorts by it (again to reverse).
@@ -881,12 +901,12 @@ function renderCommanders() {
   const box = $('commanderSlots');
   const slots = [];
   state.commanders.forEach((c, i) => {
-    slots.push(`<div class="slot filled" data-id="${c.id}">
+    slots.push(`<div class="slot filled ${selectedCard && selectedCard.id === c.id ? 'sel' : ''}" data-id="${c.id}">
       <span class="nm">${esc(c.name)}</span><span class="cost">${symbols(c.mana_cost)}</span>
-      <button data-remove-cmd="${i}" title="Remove">&times;</button></div>`);
+      <button class="x-btn" data-remove-cmd="${i}" title="Remove" aria-label="Remove"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></button></div>`);
   });
   if (!state.commanders.length) {
-    slots.push(`<div class="slot"><span class="nm label">No commander set. Use New Deck to choose one.</span></div>`);
+    slots.push(`<div class="slot"><span class="nm label">No commander set.</span><button data-pick-main>Add</button></div>`);
   } else if (secondSlotAvailable()) {
     slots.push(`<div class="slot"><span class="nm label">Partner / Background (optional)</span><button data-pick-cmd>Add</button></div>`);
   }
@@ -1153,8 +1173,11 @@ function renderResultStates() {
 
 const dlg = $('cmdDialog');
 
+// Opens the commander picker: for the main commander when the deck has none, otherwise for a partner/background.
 function openPartnerDialog() {
+  $('cmdTitle').textContent = state.commanders.length ? 'Choose Partner / Background' : 'Choose Commander';
   $('cmdInput').value = '';
+  $('cmdResults').innerHTML = '';
   dlg.showModal();
   searchPartners();
 }
@@ -1163,13 +1186,13 @@ async function searchPartners() {
   const first = state.commanders[0];
   const text = $('cmdInput').value.trim();
   const msg = $('cmdMsg');
-  const q = `f:commander ${pairQuery(first)}${nameClause(text)}`;
+  const q = (first ? `f:commander ${pairQuery(first)}` : 'is:commander -t:background') + nameClause(text);
   msg.className = 'msg'; msg.textContent = 'Searching...';
   const token = ++partnerToken;
   try {
     const data = await scry(searchUrl(q));
     if (token !== partnerToken) return;
-    const list = data.data.filter(c => canPair(first, c)).slice(0, 60);
+    const list = data.data.filter(c => !first || canPair(first, c)).slice(0, 60);
     msg.textContent = list.length ? '' : 'No matching cards.';
     $('cmdResults').innerHTML = list.map(c => `<button class="cmd-card" data-cmd="${c.id}" title="${esc(c.name)}">
       <img loading="lazy" src="${esc(c.faces[0].small)}" alt="${esc(c.name)}"><div>${esc(c.name)}</div></button>`).join('');
@@ -1181,6 +1204,7 @@ function setPartner(card) {
   delete state.cards[card.id];
   dlg.close();
   refreshDeck(true);
+  if (!selectedCard) showDefaultPreview();
 }
 
 /* ---------- Printings ---------- */
@@ -1320,19 +1344,30 @@ $('deckList').addEventListener('click', e => {
   if (!c) return;
   selectedCard = c;
   showPreview(c);
-  document.querySelectorAll('#deckList .sel').forEach(x => x.classList.remove('sel'));
+  document.querySelectorAll('#deckList .sel, #commanderSlots .sel').forEach(x => x.classList.remove('sel'));
   item.classList.add('sel');
 });
 
 $('commanderSlots').addEventListener('click', e => {
-  if (e.target.closest('[data-pick-cmd]')) return openPartnerDialog();
+  if (e.target.closest('[data-pick-cmd], [data-pick-main]')) return openPartnerDialog();
   const r = e.target.closest('[data-remove-cmd]');
   if (r) {
     const i = +r.dataset.removeCmd;
     // Removing the first commander drops any dependent partner.
-    state.commanders.splice(i, i === 0 ? state.commanders.length : 1);
+    const removed = state.commanders.splice(i, i === 0 ? state.commanders.length : 1);
+    if (selectedCard && removed.some(c => c.id === selectedCard.id)) selectedCard = null;
     refreshDeck(true);
+    if (selectedCard) showPreview(selectedCard); else showDefaultPreview();
+    return;
   }
+  // Clicking a commander selects it for the preview panel, like a deck card.
+  const slot = e.target.closest('.slot[data-id]');
+  const c = slot && cache.get(slot.dataset.id);
+  if (!c) return;
+  selectedCard = c;
+  showPreview(c);
+  document.querySelectorAll('#deckList .sel, #commanderSlots .sel').forEach(x => x.classList.remove('sel'));
+  slot.classList.add('sel');
 });
 
 $('cmdResults').addEventListener('click', e => {
@@ -1472,7 +1507,40 @@ document.addEventListener('keydown', resumeOnGesture, { once: true });
 function showDeckTitle() {
   $('deckTitle').textContent = state.name;
   $('deckTitle').title = state.description;
+  if (document.activeElement !== $('deckNameInput')) $('deckNameInput').value = state.name;
+  sizeDeckNameInput();
 }
+
+// Grow/shrink the inline name input to fit its text (CSS caps it at 50vw).
+const nameCtx = document.createElement('canvas').getContext('2d');
+function sizeDeckNameInput() {
+  const input = $('deckNameInput');
+  const cs = getComputedStyle(input);
+  nameCtx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const text = nameCtx.measureText(input.value || input.placeholder).width;
+  const chrome = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+  input.style.width = `${Math.ceil(text + chrome) + 2}px`;
+}
+
+function commitDeckName() {
+  const input = $('deckNameInput');
+  const name = input.value.trim() || 'Untitled Deck';
+  input.value = name;
+  if (name !== state.name && state.id) {
+    state.name = name;
+    persist();
+  }
+  showDeckTitle();
+}
+
+$('deckNameInput').placeholder = 'Untitled Deck';
+$('deckNameInput').addEventListener('input', sizeDeckNameInput);
+$('deckNameInput').addEventListener('change', commitDeckName);
+$('deckNameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); $('deckNameInput').blur(); }
+  else if (e.key === 'Escape') { $('deckNameInput').value = state.name; sizeDeckNameInput(); $('deckNameInput').blur(); }
+});
+$('deckNameInput').addEventListener('focus', () => $('deckNameInput').select());
 
 $('settingsBtn').addEventListener('click', () => {
   $('setName').value = state.name;
@@ -1781,7 +1849,7 @@ function setSync(text, bad) {
 
 function updateAuthUi() {
   $('authBtn').hidden = !Cloud.enabled;
-  $('authBtn').textContent = Cloud.user ? ((Cloud.profile && Cloud.profile.display_name) || 'Account') : 'Sign in';
+  $('authLabel').textContent = Cloud.user ? ((Cloud.profile && Cloud.profile.display_name) || 'Account') : 'Log in';
 }
 
 function updateCopyBtn() {
@@ -1935,6 +2003,37 @@ document.querySelector('.topbar h1 a').addEventListener('click', e => {
   history.replaceState(null, '', APP_URL);
   route();
 });
+
+/* Hamburger menu */
+
+// A modal <dialog> sliding in from the left: the browser handles the backdrop, focus trapping and Escape.
+const sideNav = $('sideNav');
+$('menuBtn').addEventListener('click', () => {
+  closeDeckMenu();
+  sideNav.showModal();
+  $('menuBtn').setAttribute('aria-expanded', 'true');
+});
+sideNav.addEventListener('close', () => $('menuBtn').setAttribute('aria-expanded', 'false'));
+$('sideNavClose').addEventListener('click', () => sideNav.close());
+sideNav.addEventListener('click', e => {
+  // The panel's content fills the dialog, so a click landing on the dialog itself is on the backdrop.
+  if (e.target === sideNav) return sideNav.close();
+  // Picking an item closes the panel first, so the dialog the item opens isn't stacked on top of it.
+  if (e.target.closest('.side-nav-item')) sideNav.close();
+}, true);
+
+$('appSettingsBtn').addEventListener('click', () => $('appSettingsDialog').showModal());
+$('aboutBtn').addEventListener('click', () => $('aboutDialog').showModal());
+$('aboutClose').addEventListener('click', () => $('aboutDialog').close());
+
+// Dark mode is the default; only the light choice is stored (index.html applies it before first paint).
+$('darkModeToggle').checked = document.documentElement.dataset.theme !== 'light';
+$('darkModeToggle').addEventListener('change', e => {
+  const dark = e.target.checked;
+  if (dark) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = 'light';
+  try { dark ? localStorage.removeItem('sparkritual.theme') : localStorage.setItem('sparkritual.theme', 'light'); } catch { /* not critical */ }
+});
+$('appSettingsClose').addEventListener('click', () => $('appSettingsDialog').close());
 
 /* Account dialog */
 
