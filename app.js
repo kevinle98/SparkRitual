@@ -418,12 +418,19 @@ function renderHome() {
   const kept = keepId ? homeList.findIndex(d => d.id === keepId) : -1;
   homeSel = Math.max(0, Math.min(kept >= 0 ? kept : homeSel, homeList.length - 1));
   stopStepping();
+  closeDeckMenu();
   const carousel = $('carousel');
   homeSlides.clear();
   carousel.replaceChildren();
+  $('deckInfo').innerHTML = '';
+  $('home').dataset.view = homeView;
+  if (homeView === 'gallery') return renderGallery();
+  if (homeView === 'list') return renderList();
   if (!homeList.length) {
-    carousel.innerHTML = '<div class="empty">No saved decks yet. Click "New Deck" above to get started.</div>';
-    $('deckInfo').innerHTML = '';
+    // Empty card where the first deck will appear; it goes away as soon as a deck exists.
+    carousel.innerHTML = `<div class="slide sel placeholder" role="button" tabindex="0" style="transform: translateZ(calc(var(--w) * .26))">
+      <div class="cover blank"><span>Create a New Deck<br>to get started</span></div>
+      <div class="refl"><div class="blank"></div></div></div>`;
     $('prevBtn').disabled = $('nextBtn').disabled = true;
     setMusic(null);
     return;
@@ -447,8 +454,9 @@ function selectSlide(i) {
 }
 
 function stepToward() {
-  if (!document.body.classList.contains('home') || homeTarget === homeSel) { stepTimer = 0; return; }
+  if (!document.body.classList.contains('home') || homeView !== 'carousel' || homeTarget === homeSel) { stepTimer = 0; return; }
   const far = Math.abs(homeTarget - homeSel) > 1;
+  closeDeckMenu();
   homeSel += Math.sign(homeTarget - homeSel);
   renderHomeSlides();
   renderInfo();
@@ -459,7 +467,8 @@ function stepToward() {
 // While resizing, slide positions track --w instantly instead of easing behind the window.
 let resizeEnd = 0, resizeFrame = 0;
 window.addEventListener('resize', () => {
-  if (!document.body.classList.contains('home') || !homeList.length) return;
+  closeDeckMenu();
+  if (!document.body.classList.contains('home') || homeView !== 'carousel' || !homeList.length) return;
   const carousel = $('carousel');
   carousel.classList.add('resizing');
   clearTimeout(resizeEnd);
@@ -558,41 +567,194 @@ function renderInfo() {
   const d = homeList[homeSel];
   $('prevBtn').disabled = homeSel === 0;
   $('nextBtn').disabled = homeSel === homeList.length - 1;
-  const names = d.commanders.map(c => c.name).join(' + ');
-  const ids = [...new Set(d.commanders.flatMap(c => c.color_identity))];
   const br = deckBracket(d);
   // Show the value being sorted on when it isn't already one of the standard lines.
   const extra = { cost: ['Value', fmtUsd(deckValue(d))], created: ['Created', fmtDate(deckCreated(d))], recent: ['Last edited', fmtDate(d.updated)] }[homeSort.key];
-  $('deckInfo').innerHTML = `<div class="info-text"><div class="title">${esc(d.name)}</div>
-    <div class="meta"><span class="lbl">Commander:</span> ${esc(names)}</div>
+  $('deckInfo').innerHTML = `<div class="info-text"><div class="title-row"><div class="title">${esc(d.name)}</div>${optsBtn(d)}</div>
+    <div class="meta"><span class="lbl">Commander:</span> ${esc(commanderName(d))}</div>
     <div class="meta"><span class="lbl">Bracket:</span> ${br.level}</div>
-    <div class="meta"><span class="lbl">Color Identity:</span> ${identitySymbols('WUBRG'.split('').filter(x => ids.includes(x)))}</div>
-    ${extra ? `<div class="meta"><span class="lbl">${extra[0]}:</span> ${esc(extra[1])}</div>` : ''}</div>
-    <div class="actions"><button class="edit" data-act="edit">Edit</button><button class="del" data-act="delete">Delete</button></div>`;
+    <div class="meta"><span class="lbl">Color Identity:</span> ${identitySymbols(deckIdentity(d))}</div>
+    ${extra ? `<div class="meta"><span class="lbl">${extra[0]}:</span> ${esc(extra[1])}</div>` : ''}</div>`;
 }
 
-function activateSlide() {
-  const d = homeList[homeSel];
-  if (d) location.hash = `deck=${d.id}`;
+const deckIdentity = d => { const ids = new Set((d.commanders || []).flatMap(c => c.color_identity || [])); return [...WUBRG].filter(x => ids.has(x)); };
+const deckCover = d => d.commanders && d.commanders[0] && d.commanders[0].faces[0].image;
+const optsBtn = d => `<button class="opts-btn" data-deck-menu="${esc(d.id)}" aria-label="Options for ${esc(d.name)}" aria-haspopup="menu" aria-expanded="false">&#8943;</button>`;
+const openDeckPage = d => { if (d) location.hash = `deck=${d.id}`; };
+
+function activateSlide() { openDeckPage(homeList[homeSel]); }
+
+function deleteDeck(d) {
+  if (!confirm(`Delete "${d.name}"? This cannot be undone.`)) return;
+  delete decks[d.id];
+  lastPushed.delete(d.id);
+  saveDecks();
+  if (d.owner && Cloud.user) Cloud.removeDeck(d.id).catch(e => setSync('Online delete failed: ' + e.message, true));
+  renderHome();
 }
+
+/* ---------- Deck options menu ("⋯" in every landing view) ---------- */
+
+// One floating menu shared by every ⋯ button; the button's data-deck-menu holds the deck id.
+// Add future deck actions here and handle them in the click listener below.
+const deckMenu = document.createElement('div');
+deckMenu.className = 'card-menu deck-menu';
+deckMenu.hidden = true;
+deckMenu.setAttribute('role', 'menu');
+deckMenu.innerHTML = '<button role="menuitem" data-act="edit">Edit</button><button role="menuitem" class="danger" data-act="delete">Delete</button>';
+document.body.appendChild(deckMenu);
+let deckMenuFor = null; // the ⋯ button the menu belongs to
+
+function openDeckMenu(btn) {
+  closeDeckMenu();
+  deckMenuFor = btn;
+  btn.setAttribute('aria-expanded', 'true');
+  deckMenu.hidden = false;
+  const r = btn.getBoundingClientRect();
+  deckMenu.style.top = `${Math.min(r.bottom + 4, innerHeight - deckMenu.offsetHeight - 4)}px`;
+  deckMenu.style.left = `${Math.max(4, Math.min(r.left, innerWidth - deckMenu.offsetWidth - 4))}px`;
+  deckMenu.querySelector('button').focus();
+}
+function closeDeckMenu(refocus = false) {
+  if (deckMenu.hidden) return;
+  deckMenu.hidden = true;
+  if (deckMenuFor) {
+    deckMenuFor.setAttribute('aria-expanded', 'false');
+    if (refocus && deckMenuFor.isConnected) deckMenuFor.focus();
+  }
+  deckMenuFor = null;
+}
+const deckMenuOpen = () => !deckMenu.hidden;
+document.addEventListener('pointerdown', e => {
+  if (deckMenuOpen() && !deckMenu.contains(e.target) && !e.target.closest('[data-deck-menu]')) closeDeckMenu();
+});
+$('home').addEventListener('scroll', () => closeDeckMenu(), true); // the menu is fixed, so it would detach from its button
+deckMenu.addEventListener('click', e => {
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (!act) return;
+  const d = deckMenuFor && decks[deckMenuFor.dataset.deckMenu];
+  closeDeckMenu();
+  if (!d) return;
+  if (act === 'edit') openDeckPage(d);
+  else if (act === 'delete') deleteDeck(d);
+});
+
+/* ---------- Landing views: carousel (default), gallery, list ---------- */
+
+const HOME_VIEWS = ['carousel', 'gallery', 'list'];
+let homeView = 'carousel';
+try {
+  const saved = localStorage.getItem('sparkritual.homeView');
+  if (HOME_VIEWS.includes(saved)) homeView = saved;
+} catch { /* keep default */ }
+$('homeView').value = homeView;
+$('homeView').addEventListener('change', e => {
+  homeView = HOME_VIEWS.includes(e.target.value) ? e.target.value : 'carousel';
+  try { localStorage.setItem('sparkritual.homeView', homeView); } catch { /* not critical */ }
+  $('home').scrollTop = 0;
+  if (document.body.classList.contains('home')) renderHome();
+});
+
+function renderGallery() {
+  setMusic(null);
+  $('galleryView').innerHTML = homeList.length
+    ? homeList.map((d, i) => {
+      const img = deckCover(d);
+      return `<div class="tile" data-i="${i}">
+        <button class="tile-art" data-open title="Open ${esc(d.name)}">${img ? `<img src="${esc(img)}" alt="${esc(d.name)}" loading="lazy" decoding="async" draggable="false">` : '<div class="blank"></div>'}</button>
+        <div class="tile-row"><div class="tile-text"><div class="tile-name">${esc(d.name)}</div><div class="tile-sub">${esc(commanderName(d))}</div></div>${optsBtn(d)}</div>
+      </div>`;
+    }).join('')
+    : '<div class="tile"><button class="tile-art placeholder" data-new><span>Create a New Deck<br>to get started</span></button></div>';
+}
+
+// Columns map onto the sort keys, so clicking a header sorts by it (again to reverse).
+const LIST_COLS = [
+  ['name', 'Deck Name'], ['commander', 'Commander'], ['color', 'Color Identity'], ['bracket', 'Bracket'],
+  ['cost', 'Value'], ['created', 'Created'], ['recent', 'Last Edited'],
+];
+let homePreview = { deck: null, face: 0 };
+
+function renderList() {
+  setMusic(null);
+  const desc = !!HOME_SORTS[homeSort.key].desc !== homeSort.reversed;
+  const head = LIST_COLS.map(([k, label]) => {
+    const on = k === homeSort.key;
+    return `<th class="c-${k}" aria-sort="${on ? (desc ? 'descending' : 'ascending') : 'none'}"><button data-sort="${k}">${label}<span class="dir">${on ? (desc ? '↓' : '↑') : ''}</span></button></th>`;
+  }).join('');
+  const body = homeList.length
+    ? homeList.map((d, i) => `<tr data-i="${i}"${i === homeSel ? ' class="sel"' : ''}>
+        <td class="c-name">${esc(d.name)}</td>
+        <td class="c-commander">${esc(commanderName(d))}</td>
+        <td class="c-color">${identitySymbols(deckIdentity(d))}</td>
+        <td class="c-bracket">${deckBracket(d).level}</td>
+        <td class="c-cost">${fmtUsd(deckValue(d))}</td>
+        <td class="c-created">${fmtDate(deckCreated(d))}</td>
+        <td class="c-recent">${fmtDate(d.updated)}</td>
+        <td class="c-opts">${optsBtn(d)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="${LIST_COLS.length + 1}" class="list-empty">No decks yet. <button data-new>Create a New Deck</button> to get started.</td></tr>`;
+  $('deckTable').innerHTML = `<thead><tr>${head}<th class="c-opts"><span class="sr-only">Options</span></th></tr></thead><tbody>${body}</tbody>`;
+  homePreview = { deck: null, face: 0 }; // force a redraw (null never matches a deck or the empty-list undefined)
+  showHomePreview(homeList[homeSel]);
+}
+
+// The list's preview panel shows the deck's commander, like the builder's card preview.
+// Without an explicit face, re-showing the deck already on screen is a no-op (keeps a flipped card flipped).
+function showHomePreview(d, face) {
+  if (homePreview.deck === d && (face === undefined || homePreview.face === face)) return;
+  face = face || 0;
+  homePreview = { deck: d, face };
+  const c = d && d.commanders && d.commanders[0];
+  $('homePreview').innerHTML = c
+    ? previewHtml(c, face, { identity: true })
+    : `<div class="preview-empty">${homeList.length ? 'Hover over a deck to preview its commander.' : 'Your decks will appear here.'}</div>`;
+}
+
+function selectListRow(i) {
+  if (!homeList.length) return;
+  homeSel = homeTarget = Math.max(0, Math.min(i, homeList.length - 1));
+  const rows = $('deckTable').tBodies[0].rows;
+  for (const r of rows) r.classList.toggle('sel', +r.dataset.i === homeSel);
+  if (rows[homeSel]) rows[homeSel].scrollIntoView({ block: 'nearest' });
+  showHomePreview(homeList[homeSel]);
+}
+
+// Same as the deck editor: the preview follows the hovered row, and anywhere else (header, empty space,
+// outside the table) it snaps back to the selected deck.
+$('deckTableWrap').addEventListener('mouseover', e => {
+  const row = e.target.closest('tr[data-i]');
+  showHomePreview(homeList[row ? +row.dataset.i : homeSel]);
+});
+$('deckTableWrap').addEventListener('mouseleave', () => showHomePreview(homeList[homeSel]));
+$('deckTable').addEventListener('dblclick', e => {
+  const row = e.target.closest('tr[data-i]');
+  if (row && !e.target.closest('button')) openDeckPage(homeList[+row.dataset.i]);
+});
+$('homePreview').addEventListener('click', e => {
+  const c = homePreview.deck && homePreview.deck.commanders[0];
+  if (c && e.target.closest('[data-flip]')) showHomePreview(homePreview.deck, (homePreview.face + 1) % c.faces.length);
+});
+
+// Clicks shared by all three views.
+$('home').addEventListener('click', e => {
+  const menuBtn = e.target.closest('[data-deck-menu]');
+  if (menuBtn) { deckMenuFor === menuBtn ? closeDeckMenu() : openDeckMenu(menuBtn); return; }
+  if (e.target.closest('[data-new]')) { $('newBtn').click(); return; }
+  const sortBtn = e.target.closest('[data-sort]');
+  if (sortBtn) { const k = sortBtn.dataset.sort; setHomeSort(k, k === homeSort.key ? !homeSort.reversed : false); return; }
+  const open = e.target.closest('#galleryView [data-open]');
+  if (open) { openDeckPage(homeList[+open.closest('[data-i]').dataset.i]); return; }
+  const row = e.target.closest('#deckTable tr[data-i]');
+  if (row) selectListRow(+row.dataset.i);
+});
 
 $('carousel').addEventListener('click', e => {
   if (swipeSuppressClick) { swipeSuppressClick = false; return; }
   const s = e.target.closest('.slide');
   if (!s) return;
+  if (s.classList.contains('placeholder')) { $('newBtn').click(); return; }
   if (+s.dataset.i === homeSel) activateSlide(); else selectSlide(+s.dataset.i);
-});
-$('deckInfo').addEventListener('click', e => {
-  const act = e.target.closest('[data-act]')?.dataset.act;
-  const d = homeList[homeSel];
-  if (act === 'edit') activateSlide();
-  else if (act === 'delete' && d && confirm(`Delete "${d.name}"? This cannot be undone.`)) {
-    delete decks[d.id];
-    lastPushed.delete(d.id);
-    saveDecks();
-    if (d.owner && Cloud.user) Cloud.removeDeck(d.id).catch(e => setSync('Online delete failed: ' + e.message, true));
-    renderHome();
-  }
 });
 
 // Wheel: always consume the event (no page scroll or swipe-back leaking through),
@@ -638,12 +800,25 @@ $('nextBtn').addEventListener('click', () => selectSlide(homeTarget + 1));
 
 document.addEventListener('keydown', e => {
   if (!document.body.classList.contains('home') || document.querySelector('dialog[open]')) return;
+  if (deckMenuOpen()) { // the open options menu takes the keyboard; Escape closes it
+    if (e.key === 'Escape') closeDeckMenu(true);
+    return;
+  }
   if (e.target.closest && e.target.closest('select, input, textarea')) return; // let the sort dropdown use its keys
+  if (homeView === 'gallery') return; // tiles are buttons; Tab + Enter opens a deck
+  if (homeView === 'list') {
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    if (step) { e.preventDefault(); selectListRow(homeSel + step); }
+    else if (e.key === 'Home') { e.preventDefault(); selectListRow(0); }
+    else if (e.key === 'End') { e.preventDefault(); selectListRow(homeList.length - 1); }
+    else if (e.key === 'Enter' && !e.target.closest('button')) homeList.length ? activateSlide() : $('newBtn').click();
+    return;
+  }
   const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
   if (step) { e.preventDefault(); selectSlide(homeTarget + step); }
   else if (e.key === 'Home') selectSlide(0);
   else if (e.key === 'End') selectSlide(homeList.length - 1);
-  else if (e.key === 'Enter' && !e.target.closest('button')) activateSlide();
+  else if (e.key === 'Enter' && !e.target.closest('button')) homeList.length ? activateSlide() : $('newBtn').click();
 });
 window.addEventListener('hashchange', route);
 
@@ -1276,7 +1451,7 @@ async function setMusic(id) {
 
 const playDeckMusic = debounce(() => {
   if (!document.body.classList.contains('home')) return;
-  const d = homeList[homeSel];
+  const d = homeView === 'carousel' && homeList[homeSel]; // the player box would cover the gallery and list
   setMusic(d && d.music ? ytId(d.music) : null);
 }, 600); // longer than the 450ms slide transition so YouTube loading never lands mid-animation
 

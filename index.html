@@ -7,11 +7,12 @@
 <link rel="preconnect" href="https://cards.scryfall.io">
 <link rel="preconnect" href="https://svgs.scryfall.io">
 <title>SparkRitual - Commander Deck Builder</title>
+<link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body class="home">
 <header class="topbar">
-  <h1><a href="#">SparkRitual</a></h1>
+  <h1><a href="#"><img class="logo" src="logo.svg" alt="">SparkRitual</a></h1>
   <span id="deckTitle" class="deck-title builder-only"></span>
   <div class="spacer"></div>
   <label class="builder-only">Sort
@@ -28,6 +29,13 @@
   <span id="syncState" class="sync builder-only"></span>
   <button id="copyBtn" class="shared-only">Copy to my decks</button>
   <button id="authBtn" hidden>Sign in</button>
+  <label class="home-only">View
+    <select id="homeView">
+      <option value="carousel" selected>Carousel</option>
+      <option value="gallery">Gallery</option>
+      <option value="list">List</option>
+    </select>
+  </label>
   <label class="home-only">Sort
     <select id="homeSort">
       <option value="commander">Commander Name</option>
@@ -43,7 +51,7 @@
   <button id="newBtn">New Deck</button>
 </header>
 
-<main class="home-page" id="home">
+<main class="home-page" id="home" data-view="carousel">
   <div id="musicBox" class="music-box" hidden>
     <div id="ytPlayer"></div>
     <div id="musicMsg" class="music-msg" hidden></div>
@@ -56,6 +64,11 @@
       <button id="nextBtn" class="nav" aria-label="Next deck">&#8250;</button>
       <div id="deckInfo" class="deck-info"></div>
     </div>
+  </div>
+  <div id="galleryView" class="gallery-view"></div>
+  <div class="list-view">
+    <aside class="panel preview" id="homePreview"></aside>
+    <div class="panel deck-table-wrap" id="deckTableWrap"><table id="deckTable" class="deck-table"></table></div>
   </div>
 </main>
 

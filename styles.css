@@ -153,14 +153,20 @@ dialog.wide { width: 94vw; max-width: 2000px; height: 80vh; }
 /* landing page */
 body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.home) .home-only { display: none; }
 #homeSortDir { min-width: 34px; padding-left: 8px; padding-right: 8px; margin-left: -6px; }
-.topbar h1 a { color: inherit; text-decoration: none; }
+.topbar h1 a { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
+.topbar h1 .logo { height: 1.2em; width: auto; display: block; }
 .home-page { position: relative; --floor: #171618; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; background: var(--floor); }
-.home-inner { width: 100%; display: flex; align-items: center; }
-.carousel-wrap { --w: clamp(180px, min(26vw, calc((100vh - 80px) / 2.23)), 460px); --h: calc(var(--w) * 1.393); --top: calc(var(--h) * 0.1 + 24px); position: relative; flex: 1; min-width: 0; }
-.carousel { position: relative; height: calc(var(--h) * 1.5 + var(--top)); overflow: hidden; perspective: calc(var(--w) * 3.7); perspective-origin: 50% calc(var(--h) + var(--top)); background: var(--floor); }
-.carousel::after { content: ''; position: absolute; left: 0; right: 0; top: calc(var(--h) + var(--top)); bottom: 0; background: linear-gradient(rgba(255, 255, 255, 0.062), rgba(255,255,255,.01) 45%, transparent); border-top: 1px solid rgba(255, 255, 255, 0.082); pointer-events: none; z-index: 100; }
+.home-inner { width: 100%; display: flex; align-items: stretch; }
+.carousel-wrap { --w: clamp(180px, min(58vw, calc((100vh - 80px) / 2.23)), 460px); --h: calc(var(--w) * 1.393); --top: calc(var(--h) * 0.1 + 24px);
+  /* Card top edge: vertically centered in the stage, but never higher than --top and always leaving at least
+     half a card of floor below for the deck info. Percentages resolve against the stage height at each use. */
+  --card-top: max(var(--top), min(50% - var(--h) / 2, 100% - var(--h) * 1.5));
+  position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* The stage fills the page height: cards sit at --card-top and the floor runs from under them to the bottom. */
+.carousel { position: relative; flex: 1 0 auto; min-height: calc(var(--h) * 1.5 + var(--top)); overflow: hidden; perspective: calc(var(--w) * 3.7); perspective-origin: 50% calc(var(--card-top) + var(--h)); background: var(--floor); }
+.carousel::after { content: ''; position: absolute; left: 0; right: 0; top: calc(var(--card-top) + var(--h)); bottom: 0; background: linear-gradient(rgba(255, 255, 255, 0.062), rgba(255,255,255,.01) 45%, transparent); border-top: 1px solid rgba(255, 255, 255, 0.082); pointer-events: none; z-index: 100; }
 /* z-index is not transitioned: restack() in app.js sets it each frame from the cards' real positions. */
-.slide { position: absolute; top: var(--top); left: 50%; width: var(--w); margin-left: calc(var(--w) / -2); cursor: pointer; will-change: transform; filter: brightness(.6); transition: transform .45s cubic-bezier(.2,.7,.2,1), filter .45s; user-select: none; -webkit-user-drag: none; }
+.slide { position: absolute; top: var(--card-top); left: 50%; width: var(--w); margin-left: calc(var(--w) / -2); cursor: pointer; will-change: transform; filter: brightness(.6); transition: transform .45s cubic-bezier(.2,.7,.2,1), filter .45s; user-select: none; -webkit-user-drag: none; }
 .carousel { touch-action: pan-y; }
 .carousel.resizing .slide { transition: none; }
 @media (prefers-reduced-motion: reduce) { .slide { transition: none; } }
@@ -171,17 +177,71 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 .slide .refl img { width: 100%; height: 100%; object-fit: cover; display: block; filter: brightness(.6) blur(2px); transform: scale(1.04); }
 .slide .refl::after { content: ''; position: absolute; inset: 0; background: linear-gradient(var(--floor) 42%, color-mix(in srgb, var(--floor) 60%, transparent)); }
 .slide .blank { background: var(--panel); border: 2px dashed var(--line); }
-.empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
-.deck-info { position: absolute; left: 0; right: 0; padding-left: calc(var(--w) * .16); top: calc(var(--h) + var(--top)); bottom: 0; z-index: 250; text-align: left; display: flex; align-items: center; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+/* Empty-state placeholder shown in the selected slot when there are no decks. */
+.slide.placeholder .cover.blank { display: flex; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; background: rgba(255, 255, 255, .03); border-color: rgba(255, 255, 255, .18); color: var(--muted); font-size: calc(var(--w) * .065); line-height: 1.35; padding: 0 10%; transition: border-color .2s, color .2s; }
+.slide.placeholder:hover .cover.blank, .slide.placeholder:focus-visible .cover.blank { border-color: var(--accent); color: var(--text); }
+.slide.placeholder:focus-visible { outline: none; }
+.slide.placeholder .refl .blank { width: 100%; height: 100%; box-sizing: border-box; border-radius: inherit; }
+.deck-info { position: absolute; left: 0; right: 0; padding-left: calc(var(--w) * .16); top: calc(var(--card-top) + var(--h)); bottom: 0; z-index: 250; text-align: left; display: flex; align-items: center; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
 .deck-info .info-text { display: flex; flex-direction: column; gap: calc(var(--w) * .013); min-width: 0; }
 .deck-info .title { font-weight: 700; font-size: calc(var(--w) * .09); margin-bottom: calc(var(--w) * .013); }
 .deck-info .meta { font-size: calc(var(--w) * .06); }
-.deck-info .actions { position: absolute; right: calc(var(--w) * .1); bottom: calc(var(--w) * .1); display: flex; gap: calc(var(--w) * .03); pointer-events: auto; }
-.deck-info .actions button { font-size: calc(var(--w) * .054); padding: .3em 1.1em; color: #fff; font-weight: 600; border: 0; }
-.deck-info .edit { background: #2f7df6; } .deck-info .edit:hover { background: #4a90ff; }
-.deck-info .del { background: #d64545; } .deck-info .del:hover { background: #ea5a5a; }
+.deck-info .title-row { display: flex; align-items: center; gap: calc(var(--w) * .04); margin-bottom: calc(var(--w) * .013); }
+.deck-info .title-row .title { margin-bottom: 0; min-width: 0; overflow-wrap: anywhere; }
+/* "⋯" deck options button, used in every landing view; the menu it opens is the shared .deck-menu. */
+.opts-btn { flex-shrink: 0; font-size: 20px; line-height: 1; padding: .05em .3em; border: 0; background: none; color: var(--muted); }
+.opts-btn:hover, .opts-btn[aria-expanded="true"] { color: var(--text); background: rgba(255, 255, 255, .08); }
+.deck-info .opts-btn { font-size: calc(var(--w) * .07); pointer-events: auto; text-shadow: inherit; }
+.deck-menu { padding: 3px; min-width: 110px; }
+.deck-menu button { font-size: 14px; padding: 5px 10px; border-radius: 4px; }
+.deck-menu button:focus-visible { background: var(--panel2); outline: none; }
+.deck-menu .danger { color: var(--bad); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Only the chosen landing view is shown. */
+.home-page:not([data-view="carousel"]) .home-inner, .home-page:not([data-view="gallery"]) .gallery-view, .home-page:not([data-view="list"]) .list-view { display: none; }
+
+/* Gallery: an album-style grid of commander covers. */
+.gallery-view { flex: 1; align-self: flex-start; display: grid; grid-template-columns: repeat(auto-fill, minmax(clamp(140px, 15vw, 220px), 1fr)); gap: 28px 20px; padding: 24px; }
+.tile { min-width: 0; }
+.tile-art { display: block; width: 100%; padding: 0; border: 0; background: none; border-radius: 4.5% / 3.2%; overflow: hidden; transition: transform .2s, box-shadow .2s; }
+.tile-art:hover, .tile-art:focus-visible { transform: translateY(-4px); box-shadow: 0 10px 24px rgba(0, 0, 0, .55); outline: none; }
+.tile-art img, .tile-art .blank { width: 100%; aspect-ratio: 488 / 680; object-fit: cover; display: block; }
+.tile-art .blank { background: var(--panel); border: 2px dashed var(--line); border-radius: inherit; }
+.tile-art.placeholder { aspect-ratio: 488 / 680; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 10%; line-height: 1.35; color: var(--muted); background: rgba(255, 255, 255, .03); border: 2px dashed rgba(255, 255, 255, .18); }
+.tile-art.placeholder:hover, .tile-art.placeholder:focus-visible { border-color: var(--accent); color: var(--text); transform: none; box-shadow: none; }
+.tile-row { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; }
+.tile-text { flex: 1; min-width: 0; }
+.tile-name, .tile-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-name { font-weight: 600; }
+.tile-sub { color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .tile-art { transition: none; } .tile-art:hover, .tile-art:focus-visible { transform: none; } }
+
+/* List: commander preview on the left (like the deck builder), a sortable table of decks on the right. */
+.list-view { flex: 1; min-width: 0; display: grid; grid-template-columns: min(40vw, calc(52vh * 0.7176 + 56px)) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 10px; padding: 10px; background: var(--bg); }
+#homePreview { grid-row: auto; }
+.deck-table-wrap { padding: 0; overflow: auto; }
+.deck-table { width: 100%; border-collapse: collapse; font-size: 14.4px; }
+.deck-table th { position: sticky; top: 0; z-index: 1; padding: 0; background: var(--panel); border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.deck-table th button { width: 100%; justify-content: flex-start; gap: 4px; padding: 10px 12px; border: 0; border-radius: 0; background: none; color: var(--muted); font-weight: 600; }
+.deck-table th button:hover { color: var(--text); }
+.deck-table th[aria-sort="ascending"] button, .deck-table th[aria-sort="descending"] button { color: var(--text); }
+.deck-table td { padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, .05); white-space: nowrap; }
+.deck-table tbody tr[data-i] { cursor: pointer; }
+.deck-table tbody tr[data-i]:hover td { background: var(--panel2); }
+.deck-table tbody tr.sel td { background: var(--panel2); }
+.deck-table tbody tr.sel td:first-child { box-shadow: inset 3px 0 var(--accent); }
+.deck-table .c-name { font-weight: 600; white-space: normal; min-width: 140px; }
+.deck-table .c-commander { white-space: normal; min-width: 160px; }
+.deck-table .c-bracket { text-align: center; }
+.deck-table th.c-bracket button { justify-content: center; }
+.deck-table .c-cost { text-align: right; font-variant-numeric: tabular-nums; }
+.deck-table th.c-cost button { justify-content: flex-end; }
+.deck-table .c-created, .deck-table .c-recent { color: var(--muted); }
+.deck-table .c-opts { width: 1%; padding: 0 6px; text-align: right; }
+.deck-table .list-empty { padding: 24px 12px; color: var(--muted); text-align: center; white-space: normal; }
 .deck-info .lbl { color: var(--muted); }
-.nav { position: absolute; top: 40%; transform: translateY(-50%); z-index: 300; width: 48px; height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 48px; line-height: 1; border: 0; border-radius: 0; background: none; color: var(--muted); }
+.nav { position: absolute; top: calc(var(--card-top) + var(--h) / 2); transform: translateY(-50%); z-index: 300; width: 48px; height: 48px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 48px; line-height: 1; border: 0; border-radius: 0; background: none; color: var(--muted); }
 .nav:hover:not(:disabled) { color: var(--text); }
 
 /* mana curve */
@@ -237,6 +297,8 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 @media (max-width: 700px) {
   .carousel-wrap { --w: clamp(150px, min(58vw, calc((100vh - 140px) / 2.23)), 460px); }
   .nav { font-size: 36px; width: 36px; }
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
+  .gallery-view { gap: 20px 14px; padding: 16px; }
   .new-preview .pv { height: auto; flex-direction: column; }
   .new-preview .pv-art { flex: none; }
   .new-preview img.art { max-height: 35vh; }
@@ -244,9 +306,11 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 }
 
 @media (max-width: 1000px) {
-  body { height: auto; }
+  body { height: auto; min-height: 100vh; min-height: 100dvh; }
   .layout { grid-template-columns: 1fr; grid-template-rows: auto; }
   .preview, .deck, .tray { grid-column: 1; grid-row: auto; }
+  .list-view { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; align-self: flex-start; }
+  #homePreview { order: 2; } /* table first on narrow screens, commander preview below it */
   .preview .pv-art { width: min(90%, 54vw); }
   .panel { max-height: 80vh; }
 }
