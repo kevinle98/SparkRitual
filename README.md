@@ -11,4 +11,3 @@ Features
 ✨ Interactive Playtest Simulator: Test opening hands on the fly, draw cards from your randomized library, and preview opening draws instantly with dynamic scaling.
 ✨ Flexible View Modes & Printing Management: Switch between detailed list views and responsive visual grid modes (with optional card stacking). Easily swap between alternative card printings, sets, and artworks.
 ✨ Import & Export Support: Seamlessly import and export standard decklists (compatible with MTG Arena, MTGO, and popular text formats).
-✨ Ambient Background Music: Optionally attach YouTube background tracks to your decks to set the tone while you brew.   

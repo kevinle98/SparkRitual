@@ -57,7 +57,6 @@ const Cloud = (() => {
     owner_id: api.user.id,
     name: (d.name || 'Untitled Deck').slice(0, 80),
     description: (d.description || '').slice(0, 5000),
-    music: d.music || '',
     visibility: d.visibility || 'private',
     sort: d.sort || 'type',
     commanders: d.commanders.map(c => c.id),

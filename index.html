@@ -58,11 +58,6 @@
     </header>
 
     <main class="home-page" id="home" data-view="carousel">
-      <div id="musicBox" class="music-box" hidden>
-        <div id="ytPlayer"></div>
-        <div id="musicMsg" class="music-msg" hidden></div>
-        <button id="musicToggle">Mute</button>
-      </div>
       <div class="home-inner">
         <div class="carousel-wrap">
           <button id="prevBtn" class="nav" aria-label="Previous deck">&#8249;</button>
@@ -158,7 +153,6 @@
       </div>
       <label class="field">Name<input id="setName" type="text" maxlength="80"></label>
       <label class="field">Description<textarea id="setDesc" rows="6" placeholder="Strategy, notes, upgrades to make..."></textarea></label>
-      <label class="field">Landing page music (YouTube link)<input id="setMusic" type="url" placeholder="https://www.youtube.com/watch?v=..."></label>
       <div id="shareBox" class="field" hidden>
         Visibility
         <select id="setVis">
@@ -168,7 +162,6 @@
         </select>
         <div class="share-row"><input id="shareLink" type="text" readonly><button id="shareCopy">Copy link</button></div>
       </div>
-      <div id="setMsg" class="msg"></div>
       <div class="dialog-foot"><span></span><button id="settingsSave" class="apply">Save</button></div>
     </dialog>
 
@@ -253,7 +246,7 @@
       </div>
       <div class="about">
         <p class="about-tag">Made <strong>by</strong> players, <strong>for</strong> players.</p>
-        <p>SparkRitual is a Commander deck builder from people who sleeve up every week. We built the tool we wanted at our own tables: fast card search that knows your commander's color identity, an honest bracket estimate before Rule Zero talks, test hands to see how a deck opens, and a little music to brew to.</p>
+        <p>SparkRitual is a Commander deck builder from people who sleeve up every week. We built the tool we wanted at our own tables: fast card search that knows your commander's color identity, an honest bracket estimate before Rule Zero talks, and test hands to see how a deck opens.</p>
         <p>There's no paywall and no ads. Brew, tinker, share your decks, and get back to playing.</p>
         <p class="about-fine">Card data and images courtesy of <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>. SparkRitual is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. &copy;Wizards of the Coast LLC.</p>
       </div>

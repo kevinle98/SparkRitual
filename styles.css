@@ -337,12 +337,6 @@ body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.ho
 .deck-table .c-opts { width: 1%; padding: 0 6px; text-align: right; }
 .deck-table .list-empty { padding: 24px 12px; color: var(--muted); text-align: center; white-space: normal; }
 
-/* background music */
-.music-box { position: absolute; top: 16px; right: 16px; z-index: 400; width: 200px; background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.music-box iframe { display: block; }
-.music-msg { padding: 8px 10px; font-size: 12px; color: var(--muted); }
-.music-box button { width: 100%; border: 0; border-radius: 0; padding: 4px; }
-
 /* bottom tray: mana curve and test hand */
 .tray { grid-column: 2; grid-row: 2; --th: clamp(170px, 27vh, 250px); display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 10px; }
 .tray[data-tab="curve"] #hand, .tray[data-tab="hand"] #curve, .tray.collapsed .tray-body,

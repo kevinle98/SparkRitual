@@ -33,7 +33,6 @@ const state = {
   id: null,
   name: 'Untitled Deck',
   description: '',
-  music: '',
   visibility: 'private',
   commanders: [],      // normalized cards
   cards: {},           // id -> { card, qty }
@@ -290,9 +289,9 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) flush
 // persist() replaces the deck object, so anything memoized per deck object (bracket, value) recomputes after an edit.
 function persist() {
   if (!state.id) return;
-  const { id, name, description, music, visibility, commanders, cards, sort } = state;
+  const { id, name, description, visibility, commanders, cards, sort } = state;
   const owner = decks[id]?.owner || Cloud.user?.id || undefined;
-  decks[id] = { id, name, description, music, visibility, owner, commanders, cards, sort, updated: Date.now() };
+  decks[id] = { id, name, description, visibility, owner, commanders, cards, sort, updated: Date.now() };
   saveDecks();
   if (owner) queueCloud(id);
 }
@@ -334,10 +333,9 @@ function resetBuilder() {
 
 function openDeck(id) {
   const d = decks[id];
-  Object.assign(state, { id, name: d.name, description: d.description || '', music: d.music || '', visibility: d.visibility || 'private', commanders: d.commanders || [], cards: d.cards || {}, sort: d.sort || 'type' });
+  Object.assign(state, { id, name: d.name, description: d.description || '', visibility: d.visibility || 'private', commanders: d.commanders || [], cards: d.cards || {}, sort: d.sort || 'type' });
   allCards(state.commanders, state.cards).forEach(c => cache.set(c.id, c));
   document.body.classList.remove('home');
-  setMusic(null);
   showDeckTitle();
   clearSearch();
   resetBuilder();
@@ -471,7 +469,6 @@ function renderHome() {
   carousel.replaceChildren();
   $('deckInfo').innerHTML = '';
   $('home').dataset.view = homeView;
-  if (homeView !== 'carousel') setMusic(null); // the player box would cover the gallery and list
   if (homeView === 'gallery') return renderGallery();
   if (homeView === 'list') return renderList();
   if (!homeList.length) {
@@ -489,7 +486,6 @@ function renderHome() {
       <div class="refl"><div class="blank"></div></div></div>`;
     $('prevBtn').disabled = $('nextBtn').disabled = true;
     $('deckInfo').innerHTML = infoHtml('<div class="title muted">No decks created.</div>', [['Commander', '--'], ['Bracket', '--'], ['Color Identity', '--']]);
-    setMusic(null);
     return;
   }
   const selected = createHomeSlide(homeSel);
@@ -498,7 +494,6 @@ function renderHome() {
   updateHomeRadius();
   renderHomeSlides();
   renderInfo();
-  playDeckMusic();
 }
 
 // Cover Flow: the selected deck faces front, the rest fan out rotated and receding.
@@ -517,7 +512,6 @@ function stepToward() {
   homeSel += Math.sign(homeTarget - homeSel);
   renderHomeSlides();
   renderInfo();
-  playDeckMusic();
   stepTimer = setTimeout(stepToward, far ? CATCHUP_MS : STEP_MS);
 }
 
@@ -1430,88 +1424,6 @@ $('viewDialog').addEventListener('change', e => {
 
 $('sortSelect').addEventListener('change', e => { state.sort = e.target.value; persist(); renderDeck(); });
 
-/* ---------- Background music (landing page) ---------- */
-
-const YT_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be']);
-
-// Only a bare 11-character video ID is ever embedded, never the raw URL.
-function ytId(url) {
-  try {
-    const u = new URL(url);
-    if (!YT_HOSTS.has(u.hostname)) return null;
-    const id = u.hostname === 'youtu.be' ? u.pathname.slice(1)
-      : u.searchParams.get('v') || (u.pathname.match(/^\/(?:embed|shorts|live)\/([^/?]+)/) || [])[1];
-    return /^[\w-]{11}$/.test(id || '') ? id : null;
-  } catch { return null; }
-}
-
-let yt = null, ytReady = false, ytWanted = null, ytApi = null;
-
-function loadYtApi() {
-  if (!ytApi) {
-    ytApi = new Promise(resolve => {
-      window.onYouTubeIframeAPIReady = resolve;
-      const s = document.createElement('script');
-      s.src = 'https://www.youtube.com/iframe_api';
-      document.head.appendChild(s);
-    });
-  }
-  return ytApi;
-}
-
-function showMusicError(text) {
-  $('musicMsg').textContent = text;
-  $('musicMsg').hidden = !text;
-  $('musicToggle').hidden = !!text;
-}
-
-function applyMusic() {
-  if (!ytReady) return;
-  if (ytWanted) {
-    if (yt.getVideoData().video_id !== ytWanted) { showMusicError(''); yt.loadVideoById(ytWanted); } else yt.playVideo();
-  } else yt.pauseVideo();
-}
-
-async function setMusic(id) {
-  ytWanted = id;
-  $('musicBox').hidden = !id;
-  if (!id) { playDeckMusic.cancel(); applyMusic(); return; }
-  // Error 153: YouTube needs a real http(s) origin to validate the embedding page.
-  if (!/^https?:$/.test(location.protocol)) {
-    showMusicError('YouTube blocks embeds on file:// pages. Serve this folder (e.g. python -m http.server) and open http://localhost:8000.');
-    return;
-  }
-  if (yt) return applyMusic();
-  await loadYtApi();
-  if (yt) return;
-  yt = new YT.Player('ytPlayer', {
-    width: 200, height: 200, videoId: ytWanted,
-    playerVars: { autoplay: 1, loop: 1, playlist: ytWanted, playsinline: 1, origin: location.origin },
-    events: {
-      onReady: () => { ytReady = true; applyMusic(); },
-      onError: e => showMusicError([101, 150].includes(e.data) ? 'The video owner does not allow embedding.' : 'This video cannot be played.'),
-    },
-  });
-}
-
-const playDeckMusic = debounce(() => {
-  if (!bodyIs('home')) return;
-  const d = homeView === 'carousel' && homeList[homeSel]; // the player box would cover the gallery and list
-  setMusic(d && d.music ? ytId(d.music) : null);
-}, 600); // longer than the 450ms slide transition so YouTube loading never lands mid-animation
-
-$('musicToggle').addEventListener('click', () => {
-  if (!ytReady) return;
-  const muted = yt.isMuted();
-  if (muted) yt.unMute(); else yt.mute();
-  $('musicToggle').textContent = muted ? 'Mute' : 'Unmute';
-});
-
-// Browsers block sound until the page has had a user gesture; retry once on the first one.
-function resumeOnGesture() { if (ytReady && ytWanted) yt.playVideo(); }
-document.addEventListener('pointerdown', resumeOnGesture, { once: true });
-document.addEventListener('keydown', resumeOnGesture, { once: true });
-
 /* ---------- Deck settings ---------- */
 
 function showDeckTitle() {
@@ -1555,19 +1467,14 @@ $('deckNameInput').addEventListener('focus', () => $('deckNameInput').select());
 $('settingsBtn').addEventListener('click', () => {
   $('setName').value = state.name;
   $('setDesc').value = state.description;
-  $('setMusic').value = state.music;
-  setMsg('setMsg', '');
   $('shareBox').hidden = !(Cloud.enabled && Cloud.user);
   $('setVis').value = state.visibility;
   $('shareLink').value = `${APP_URL}?d=${state.id}`;
   $('settingsDialog').showModal();
 });
 $('settingsSave').addEventListener('click', () => {
-  const music = $('setMusic').value.trim();
-  if (music && !ytId(music)) return setMsg('setMsg', 'Enter a valid YouTube video link.', true);
   state.name = $('setName').value.trim() || 'Untitled Deck';
   state.description = $('setDesc').value.trim();
-  state.music = music;
   state.visibility = $('setVis').value;
   persist();
   flushDeck(state.id); // so a freshly copied share link works immediately
@@ -1866,7 +1773,7 @@ async function hydrate(row) {
   const cards = {};
   for (const [id, qty] of Object.entries(row.cards)) if (cache.has(id)) cards[id] = { card: cache.get(id), qty };
   return {
-    id: row.id, name: row.name, description: row.description, music: row.music, visibility: row.visibility,
+    id: row.id, name: row.name, description: row.description, visibility: row.visibility,
     commanders: row.commanders.map(id => cache.get(id)).filter(Boolean), cards, sort: row.sort,
     updated: Date.parse(row.updated_at) || Date.now(),
   };
@@ -1924,7 +1831,6 @@ async function openShared(id) {
   const tok = ++sharedTok;
   document.body.classList.remove('home');
   document.body.classList.add('shared');
-  setMusic(null);
   state.id = null; // nothing from this view is ever saved locally
   $('deckTitle').textContent = 'Loading deck...';
   $('sharedDesc').textContent = '';
@@ -1936,7 +1842,7 @@ async function openShared(id) {
     if (!row) throw new Error('This deck was not found, or it is private.');
     const d = await hydrate(row);
     if (tok !== sharedTok) return;
-    Object.assign(state, { id: null, name: d.name, description: d.description, music: '', visibility: d.visibility, commanders: d.commanders, cards: d.cards, sort: d.sort || 'type' });
+    Object.assign(state, { id: null, name: d.name, description: d.description, visibility: d.visibility, commanders: d.commanders, cards: d.cards, sort: d.sort || 'type' });
     sharedInfo = { source: d, owner: row.owner, ownerId: row.owner_id };
     document.title = `${d.name} - SparkRitual`;
     $('deckTitle').textContent = `${d.name} by ${row.owner}`;

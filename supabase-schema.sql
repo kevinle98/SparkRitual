@@ -11,7 +11,6 @@ create table public.decks (
   owner_id    uuid not null references public.profiles(id) on delete cascade,
   name        text not null default 'Untitled Deck' check (char_length(name) <= 80),
   description text not null default '' check (char_length(description) <= 5000),
-  music       text not null default '',
   visibility  text not null default 'private' check (visibility in ('private', 'unlisted', 'public')),
   commanders  jsonb not null default '[]',
   cards       jsonb not null default '{}',
@@ -38,7 +37,7 @@ create policy "delete own decks"         on public.decks for delete using (owner
 create or replace function public.get_deck(p_id text)
 returns json language sql security definer set search_path = public stable as $$
   select json_build_object(
-    'id', d.id, 'name', d.name, 'description', d.description, 'music', d.music,
+    'id', d.id, 'name', d.name, 'description', d.description,
     'visibility', d.visibility, 'commanders', d.commanders, 'cards', d.cards, 'sort', d.sort,
     'owner', p.display_name, 'owner_id', d.owner_id, 'updated_at', d.updated_at)
   from public.decks d join public.profiles p on p.id = d.owner_id
