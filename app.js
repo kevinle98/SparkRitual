@@ -3,6 +3,14 @@
 const API = 'https://api.scryfall.com';
 const DECKS_KEY = 'sparkritual.decks.v2';
 const LEGACY_KEY = 'sparkritual.deck.v1';
+const APP_URL = location.href.split(/[?#]/)[0];
+const APP_TITLE = document.title;
+
+// localStorage can be missing (private mode) or full; every read and write goes through here.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* unavailable or full */ } },
+};
 
 // Carry over data saved under the old "deckbench." key prefix.
 try {
@@ -19,6 +27,7 @@ const TYPE_ORDER = ['Creature', 'Planeswalker', 'Battle', 'Instant', 'Sorcery', 
 const TYPE_PRIORITY = ['Land', 'Creature', 'Planeswalker', 'Battle', 'Instant', 'Sorcery', 'Artifact', 'Enchantment'];
 const COLOR_ORDER = ['Colorless', 'White', 'Blue', 'Black', 'Red', 'Green', 'Multicolor', 'Land'];
 const COLOR_NAMES = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
+const WUBRG = 'WUBRG';
 
 const state = {
   id: null,
@@ -32,19 +41,23 @@ const state = {
 };
 const cache = new Map(); // id -> normalized card (for hover lookups)
 const search = { url: null, token: 0, text: '', list: [] };
-let partnerToken = 0;
 
 const $ = id => document.getElementById(id);
+const bodyIs = cls => document.body.classList.contains(cls);
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ESC_MAP[c]);
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
-const unlimitedCache = new WeakMap(); // card -> bool (the regex ran on every call before)
-const isUnlimited = c => {
-  let u = unlimitedCache.get(c);
-  if (u === undefined) { u = BASICS.has(c.name) || /any number of cards named/i.test(c.oracle_text); unlimitedCache.set(c, u); }
-  return u;
-};
+// Memoize a pure function of an object (card or deck) for that object's lifetime.
+const memo = fn => { const m = new WeakMap(); return o => { let v = m.get(o); if (v === undefined) m.set(o, v = fn(o)); return v; }; };
+const isUnlimited = memo(c => BASICS.has(c.name) || /any number of cards named/i.test(c.oracle_text));
 const nameClause = t => t ? ` name:${/\s/.test(t) ? JSON.stringify(t) : t}` : '';
+
+// Status line: an element with class "msg" (or "sync") whose "err" class marks errors.
+function setMsg(el, text, bad) {
+  if (typeof el === 'string') el = $(el);
+  el.textContent = text;
+  el.classList.toggle('err', !!bad);
+}
 
 /* ---------- Scryfall helpers ---------- */
 
@@ -75,6 +88,9 @@ function normalize(c) {
   };
 }
 
+// Normalize raw Scryfall cards and register them for hover/click lookups.
+const intern = raw => raw.map(c => { const n = normalize(c); cache.set(n.id, n); return n; });
+
 async function scry(url) {
   const res = await fetch(url);
   const data = await res.json();
@@ -82,21 +98,23 @@ async function scry(url) {
     if (res.status === 404) return { data: [], next_page: null };
     throw new Error(data.details || 'Scryfall request failed');
   }
-  data.data = data.data.map(normalize);
-  data.data.forEach(c => cache.set(c.id, c));
+  data.data = intern(data.data);
   return data;
 }
 
+// Batched lookup by id or name; Scryfall accepts at most 75 identifiers per request.
 async function collection(identifiers) {
-  const res = await fetch(`${API}/cards/collection`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifiers }),
-  });
-  if (!res.ok) throw new Error('Scryfall request failed');
-  const cards = (await res.json()).data.map(normalize);
-  cards.forEach(c => cache.set(c.id, c));
-  return cards;
+  const out = [];
+  for (let i = 0; i < identifiers.length; i += 75) {
+    const res = await fetch(`${API}/cards/collection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifiers: identifiers.slice(i, i + 75) }),
+    });
+    if (!res.ok) throw new Error('Scryfall request failed');
+    out.push(...intern((await res.json()).data));
+  }
+  return out;
 }
 
 const searchUrl = q => `${API}/cards/search?unique=cards&order=name&q=${encodeURIComponent(q)}`;
@@ -122,6 +140,7 @@ function symbols(text) {
 }
 
 const identitySymbols = ids => symbols(ids.length ? ids.map(x => `{${x}}`).join('') : '{C}');
+const cardImg = (c, alt = c.name) => `<img loading="lazy" src="${esc(c.faces[0].small)}" alt="${esc(alt)}">`;
 
 /* ---------- Commander / partner rules ---------- */
 
@@ -157,14 +176,23 @@ function pairQuery(a) {
   return parts.length ? `(${parts.join(' or ')})` : null;
 }
 
+// Legal commanders (no `first`), or cards that can pair with `first`, optionally filtered by name.
+async function searchCommanders(first, text) {
+  const q = (first ? `f:commander ${pairQuery(first)}` : 'is:commander -t:background') + nameClause(text);
+  const { data } = await scry(searchUrl(q));
+  return first ? data.filter(c => canPair(first, c)) : data;
+}
+
+// Combined color identity of a set of commanders, in WUBRG order.
+const identityOf = commanders => {
+  const set = new Set(commanders.flatMap(c => c.color_identity || []));
+  return [...WUBRG].filter(x => set.has(x));
+};
+
 let identityKey = '', identityCache = [];
 function identity() {
   const key = state.commanders.map(c => c.id).join();
-  if (key !== identityKey) {
-    const set = new Set(state.commanders.flatMap(c => c.color_identity));
-    identityCache = 'WUBRG'.split('').filter(x => set.has(x));
-    identityKey = key;
-  }
+  if (key !== identityKey) { identityCache = identityOf(state.commanders); identityKey = key; }
   return identityCache;
 }
 
@@ -185,28 +213,25 @@ function isTutor(text) {
   return !!m && !/\bnamed\b/i.test(m[1]) && !LAND_WORDS.test(m[1]);
 }
 
-// The regex tests only depend on the card, so run them once per card object.
-const flagCache = new WeakMap();
-function cardFlags(card) {
-  let f = flagCache.get(card);
-  if (!f) {
-    const t = card.oracle_text;
-    f = {
-      extra: /takes? an extra turn|extra turns? after this one/i.test(t),
-      mld: /destroy (all|each) lands?|each player sacrifices? [^.]*lands?/i.test(t),
-      tutor: isTutor(t),
-    };
-    flagCache.set(card, f);
-  }
-  return f;
-}
+// The regex tests only depend on the card, so they run once per card object.
+const cardFlags = memo(card => {
+  const t = card.oracle_text;
+  return {
+    extra: /takes? an extra turn|extra turns? after this one/i.test(t),
+    mld: /destroy (all|each) lands?|each player sacrifices? [^.]*lands?/i.test(t),
+    tutor: isTutor(t),
+  };
+});
+
+// Commanders count as one copy each alongside the deck's { card, qty } entries.
+const deckEntries = (commanders = [], cards = {}) => [...commanders.map(card => ({ card, qty: 1 })), ...Object.values(cards)];
+const allCards = (commanders, cards) => deckEntries(commanders, cards).map(e => e.card);
 
 // Heuristic only: counts Game Changers, extra-turn cards, mass land denial and tutors.
 function estimateBracket(commanders = state.commanders, cards = state.cards) {
-  const entries = [...commanders.map(card => ({ card, qty: 1 })), ...Object.values(cards)];
   const gcNames = [];
   let extra = 0, mld = 0, tutors = 0;
-  for (const { card, qty } of entries) {
+  for (const { card, qty } of deckEntries(commanders, cards)) {
     const f = cardFlags(card);
     if (card.game_changer) gcNames.push(card.name);
     if (f.extra) extra += qty;
@@ -255,60 +280,67 @@ let decks = {}; // id -> { id, name, commanders, cards, sort, updated }
 let saveTimer = 0;
 function writeDecks() {
   clearTimeout(saveTimer); saveTimer = 0;
-  try { localStorage.setItem(DECKS_KEY, JSON.stringify(decks)); } catch { /* storage full */ }
+  store.set(DECKS_KEY, JSON.stringify(decks));
 }
 function saveDecks() { if (!saveTimer) saveTimer = setTimeout(writeDecks, 400); }
 const flushDecks = () => { if (saveTimer) writeDecks(); };
 addEventListener('pagehide', flushDecks);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushDecks(); });
 
+// persist() replaces the deck object, so anything memoized per deck object (bracket, value) recomputes after an edit.
 function persist() {
   if (!state.id) return;
   const { id, name, description, music, visibility, commanders, cards, sort } = state;
-  const owner = (decks[id] && decks[id].owner) || (Cloud.user && Cloud.user.id) || undefined;
+  const owner = decks[id]?.owner || Cloud.user?.id || undefined;
   decks[id] = { id, name, description, music, visibility, owner, commanders, cards, sort, updated: Date.now() };
   saveDecks();
   if (owner) queueCloud(id);
 }
 
 function loadDecks() {
-  try { decks = JSON.parse(localStorage.getItem(DECKS_KEY)) || {}; } catch { decks = {}; }
+  try { decks = JSON.parse(store.get(DECKS_KEY)) || {}; } catch { decks = {}; }
   // Carry over the single deck saved by earlier versions.
   try {
-    const old = JSON.parse(localStorage.getItem(LEGACY_KEY));
+    const old = JSON.parse(store.get(LEGACY_KEY));
     if (old && (old.commanders || []).length) {
       const id = newId();
       decks[id] = { id, name: old.name || 'Untitled Deck', commanders: old.commanders, cards: old.cards || {}, sort: old.sort || 'type', updated: Date.now() };
       writeDecks(); // immediate: the legacy key is removed right after
     }
-    localStorage.removeItem(LEGACY_KEY);
+    store.set(LEGACY_KEY, null);
   } catch { /* ignore corrupt data */ }
 }
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const gotoDeck = id => { location.hash = `deck=${id}`; };
+const openDeckPage = d => { if (d) gotoDeck(d.id); };
 
 function createDeck(name, commanders, cards = {}) {
   const id = newId();
-  const owner = Cloud.user ? Cloud.user.id : undefined;
+  const owner = Cloud.user?.id;
   decks[id] = { id, name, commanders, cards, sort: 'type', visibility: 'private', owner, updated: Date.now() };
   saveDecks();
   if (owner) queueCloud(id);
-  location.hash = `deck=${id}`;
+  gotoDeck(id);
+}
+
+// Fresh selection, test hand and preview for the deck now in `state`.
+function resetBuilder() {
+  selectedCard = null;
+  dealHand();
+  showDefaultPreview();
+  renderDeck();
 }
 
 function openDeck(id) {
   const d = decks[id];
   Object.assign(state, { id, name: d.name, description: d.description || '', music: d.music || '', visibility: d.visibility || 'private', commanders: d.commanders || [], cards: d.cards || {}, sort: d.sort || 'type' });
-  [...state.commanders, ...Object.values(state.cards).map(e => e.card)].forEach(c => cache.set(c.id, c));
+  allCards(state.commanders, state.cards).forEach(c => cache.set(c.id, c));
   document.body.classList.remove('home');
   setMusic(null);
   showDeckTitle();
-  $('searchInput').value = '';
-  closeDrop();
-  previewCard = null; selectedCard = null;
-  dealHand();
-  showDefaultPreview();
-  renderDeck();
+  clearSearch();
+  resetBuilder();
   runSearch();
   refreshStale();
 }
@@ -326,14 +358,16 @@ function route() {
   const m = location.hash.match(/^#deck=(.+)$/);
   const shared = new URLSearchParams(location.search).get('d');
   if (shared && !m) return openShared(shared);
-  if (document.body.classList.contains('shared')) { // leaving a shared page
+  if (bodyIs('shared')) { // leaving a shared page
     document.body.classList.remove('shared');
     sharedInfo = null;
-    document.title = 'SparkRitual - Commander Deck Builder';
+    document.title = APP_TITLE;
     history.replaceState(null, '', APP_URL + location.hash);
   }
   if (m && decks[m[1]]) openDeck(m[1]); else showHome();
 }
+
+/* ---------- Landing page: carousel ---------- */
 
 let homeList = [], homeSel = 0, homeRadius = 0;
 // homeTarget is where navigation is heading; homeSel walks toward it one slot at a time.
@@ -341,9 +375,20 @@ let homeTarget = 0, stepTimer = 0;
 const homeSlides = new Map();
 const STEP_MS = 160, CATCHUP_MS = 90; // pace for single steps vs. catching up on long jumps
 
+const deckCover = d => d.commanders?.[0]?.faces[0].image;
+const commanderName = d => (d.commanders || []).map(c => c.name).join(' + ');
+const deckIdentity = d => identityOf(d.commanders || []);
+
+// Cover Flow placement for a slide `o` slots away from the selected one (negative = left).
+function slideTransform(o) {
+  if (!o) return 'translateZ(calc(var(--w) * .26))';
+  const sign = Math.sign(o), a = Math.abs(o);
+  return `translateX(calc(${sign} * var(--w) * (0.75 + ${a - 1} * 0.3))) translateZ(calc(var(--w) * -.46)) rotateY(${-sign * 62}deg)`;
+}
+
 function createHomeSlide(i) {
   const d = homeList[i];
-  const img = d.commanders[0] && d.commanders[0].faces[0].image;
+  const img = deckCover(d);
   const slide = document.createElement('div');
   slide.className = 'slide';
   slide.dataset.i = i;
@@ -382,12 +427,10 @@ function renderHomeSlides() {
       const next = [...carousel.children].find(child => +child.dataset.i > i);
       carousel.insertBefore(slide, next || null);
     }
-    const o = i - homeSel, a = Math.abs(o), sign = Math.sign(o);
+    const o = i - homeSel;
     slide.classList.toggle('sel', o === 0);
-    if (!slide.style.zIndex) slide.style.zIndex = 100 - a; // new slides only; restack() owns it after that
-    slide.style.transform = o === 0
-      ? 'translateZ(calc(var(--w) * .26))'
-      : `translateX(calc(${sign} * var(--w) * (0.75 + ${a - 1} * 0.3))) translateZ(calc(var(--w) * -.46)) rotateY(${-sign * 62}deg)`;
+    if (!slide.style.zIndex) slide.style.zIndex = 100 - Math.abs(o); // new slides only; restack() owns it after that
+    slide.style.transform = slideTransform(o);
   }
   trackStacking();
 }
@@ -413,20 +456,22 @@ function restack() {
 
 const EMPTY_GHOSTS = 8; // decorative empty decks per side when there are no decks
 const PLUS_ICON = '<svg class="plus-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5"/><path d="M12 7v10M7 12h10"/></svg>';
+const infoHtml = (title, rows) => `<div class="info-text"><div class="title-row">${title}</div>${rows.map(([l, v]) => `<div class="meta"><span class="lbl">${l}:</span> ${v}</div>`).join('')}</div>`;
 
 function renderHome() {
   // Keep the same deck selected even if a sync or edit re-sorted the list.
-  const keepId = homeList[homeSel] && homeList[homeSel].id;
+  const keepId = homeList[homeSel]?.id;
   homeList = sortDecks(Object.values(decks));
   const kept = keepId ? homeList.findIndex(d => d.id === keepId) : -1;
   homeSel = Math.max(0, Math.min(kept >= 0 ? kept : homeSel, homeList.length - 1));
   stopStepping();
-  closeDeckMenu();
+  deckMenu.close();
   const carousel = $('carousel');
   homeSlides.clear();
   carousel.replaceChildren();
   $('deckInfo').innerHTML = '';
   $('home').dataset.view = homeView;
+  if (homeView !== 'carousel') setMusic(null); // the player box would cover the gallery and list
   if (homeView === 'gallery') return renderGallery();
   if (homeView === 'list') return renderList();
   if (!homeList.length) {
@@ -435,18 +480,15 @@ function renderHome() {
     const ghosts = [];
     for (let a = EMPTY_GHOSTS; a >= 1; a--) {
       for (const sign of [-1, 1]) {
-        ghosts.push(`<div class="slide ghost" aria-hidden="true" style="z-index: ${100 - a}; transform: translateX(calc(${sign} * var(--w) * (0.75 + ${a - 1} * 0.3))) translateZ(calc(var(--w) * -.46)) rotateY(${-sign * 62}deg)">
+        ghosts.push(`<div class="slide ghost" aria-hidden="true" style="z-index: ${100 - a}; transform: ${slideTransform(sign * a)}">
           <div class="cover blank"></div><div class="refl"><div class="blank"></div></div></div>`);
       }
     }
-    carousel.innerHTML = ghosts.join('') + `<div class="slide sel placeholder" role="button" tabindex="0" aria-label="Create a new deck" title="Create a new deck" style="z-index: 100; transform: translateZ(calc(var(--w) * .26))">
+    carousel.innerHTML = ghosts.join('') + `<div class="slide sel placeholder" role="button" tabindex="0" aria-label="Create a new deck" title="Create a new deck" style="z-index: 100; transform: ${slideTransform(0)}">
       <div class="cover blank">${PLUS_ICON}</div>
       <div class="refl"><div class="blank"></div></div></div>`;
     $('prevBtn').disabled = $('nextBtn').disabled = true;
-    $('deckInfo').innerHTML = `<div class="info-text"><div class="title-row"><div class="title muted">No decks created.</div></div>
-      <div class="meta"><span class="lbl">Commander:</span> --</div>
-      <div class="meta"><span class="lbl">Bracket:</span> --</div>
-      <div class="meta"><span class="lbl">Color Identity:</span> --</div></div>`;
+    $('deckInfo').innerHTML = infoHtml('<div class="title muted">No decks created.</div>', [['Commander', '--'], ['Bracket', '--'], ['Color Identity', '--']]);
     setMusic(null);
     return;
   }
@@ -469,9 +511,9 @@ function selectSlide(i) {
 }
 
 function stepToward() {
-  if (!document.body.classList.contains('home') || homeView !== 'carousel' || homeTarget === homeSel) { stepTimer = 0; return; }
+  if (!bodyIs('home') || homeView !== 'carousel' || homeTarget === homeSel) { stepTimer = 0; return; }
   const far = Math.abs(homeTarget - homeSel) > 1;
-  closeDeckMenu();
+  deckMenu.close();
   homeSel += Math.sign(homeTarget - homeSel);
   renderHomeSlides();
   renderInfo();
@@ -482,8 +524,7 @@ function stepToward() {
 // While resizing, slide positions track --w instantly instead of easing behind the window.
 let resizeEnd = 0, resizeFrame = 0;
 window.addEventListener('resize', () => {
-  closeDeckMenu();
-  if (!document.body.classList.contains('home') || homeView !== 'carousel' || !homeList.length) return;
+  if (!bodyIs('home') || homeView !== 'carousel' || !homeList.length) return;
   const carousel = $('carousel');
   carousel.classList.add('resizing');
   clearTimeout(resizeEnd);
@@ -496,25 +537,12 @@ window.addEventListener('resize', () => {
   });
 });
 
-const bracketCache = new Map();
-function deckBracket(d) {
-  const key = `${d.id}:${d.updated}`;
-  if (!bracketCache.has(key)) bracketCache.set(key, estimateBracket(d.commanders, d.cards));
-  return bracketCache.get(key);
-}
+/* ---------- Landing page: sorting ---------- */
 
-/* ---------- Carousel sorting ---------- */
-
-const priceCache = new Map();
+// Per deck object: persist() and sync replace the object after every change, so these never go stale.
+const deckBracket = memo(d => estimateBracket(d.commanders, d.cards));
 // Total value of the printings in the deck (commanders + every copy), using each printing's USD price.
-function deckValue(d) {
-  const key = `${d.id}:${d.updated}`;
-  if (!priceCache.has(key)) {
-    const entries = [...(d.commanders || []).map(card => ({ card, qty: 1 })), ...Object.values(d.cards || {})];
-    priceCache.set(key, entries.reduce((sum, { card, qty }) => sum + (parseFloat(card.prices && card.prices.usd) || 0) * qty, 0));
-  }
-  return priceCache.get(key);
-}
+const deckValue = memo(d => deckEntries(d.commanders, d.cards).reduce((sum, { card, qty }) => sum + (parseFloat(card.prices?.usd) || 0) * qty, 0));
 
 // Deck ids start with Date.now() in base 36 (see newId), so creation time comes free with every deck.
 function deckCreated(d) {
@@ -522,16 +550,13 @@ function deckCreated(d) {
   return t > 1.4e12 && t < Date.now() + 864e5 ? t : (d.created || d.updated || 0);
 }
 
-const WUBRG = 'WUBRG';
 // Colorless first, then mono W, U, B, R, G, then pairs (WU, WB, ...), and so on up to five colors.
 function colorKey(d) {
-  const ids = new Set((d.commanders || []).flatMap(c => c.color_identity || []));
-  const idx = [...WUBRG].map((c, i) => ids.has(c) ? i : -1).filter(i => i >= 0);
+  const idx = deckIdentity(d).map(x => WUBRG.indexOf(x));
   return [idx.length, ...idx];
 }
 const cmpArr = (a, b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const x = (a[i] ?? -1) - (b[i] ?? -1); if (x) return x; } return 0; };
 const cmpText = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
-const commanderName = d => (d.commanders || []).map(c => c.name).join(' + ');
 
 // Each sort has a natural direction (desc = 1 means biggest/newest first); the topbar button reverses it.
 const HOME_SORTS = {
@@ -546,14 +571,15 @@ const HOME_SORTS = {
 
 let homeSort = { key: 'recent', reversed: false };
 try {
-  const saved = JSON.parse(localStorage.getItem('sparkritual.homeSort'));
+  const saved = JSON.parse(store.get('sparkritual.homeSort'));
   if (saved && HOME_SORTS[saved.key]) homeSort = { key: saved.key, reversed: !!saved.reversed };
 } catch { /* keep default */ }
 
+const sortIsDesc = () => !!HOME_SORTS[homeSort.key].desc !== homeSort.reversed;
+
 function sortDecks(list) {
-  const s = HOME_SORTS[homeSort.key];
-  const dir = (s.desc ? -1 : 1) * (homeSort.reversed ? -1 : 1);
-  return list.sort((a, b) => dir * s.cmp(a, b) || cmpText(a.name || '', b.name || '') || (a.id < b.id ? -1 : 1));
+  const dir = sortIsDesc() ? -1 : 1, cmp = HOME_SORTS[homeSort.key].cmp;
+  return list.sort((a, b) => dir * cmp(a, b) || cmpText(a.name || '', b.name || '') || (a.id < b.id ? -1 : 1));
 }
 
 // Arrow beside bars that grow (ascending) or shrink (descending) in the direction of the arrow.
@@ -561,8 +587,7 @@ const SORT_ASC_ICON = '<svg class="sort-icon" viewBox="0 0 24 24" aria-hidden="t
 const SORT_DESC_ICON = '<svg class="sort-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M12 7h9M12 12h6M12 17h3"/></svg>';
 
 function showHomeSort() {
-  const s = HOME_SORTS[homeSort.key];
-  const desc = !!s.desc !== homeSort.reversed;
+  const desc = sortIsDesc();
   $('homeSort').value = homeSort.key;
   $('homeSortDir').innerHTML = desc ? SORT_DESC_ICON : SORT_ASC_ICON;
   $('homeSortDir').title = `${desc ? 'Descending' : 'Ascending'}: click to reverse`;
@@ -571,9 +596,9 @@ function showHomeSort() {
 
 function setHomeSort(key, reversed) {
   homeSort = { key, reversed };
-  try { localStorage.setItem('sparkritual.homeSort', JSON.stringify(homeSort)); } catch { /* not critical */ }
+  store.set('sparkritual.homeSort', JSON.stringify(homeSort));
   showHomeSort();
-  if (document.body.classList.contains('home')) renderHome(); // renderHome keeps the selected deck in view
+  if (bodyIs('home')) renderHome(); // renderHome keeps the selected deck in view
 }
 
 $('homeSort').addEventListener('change', e => setHomeSort(e.target.value, false));
@@ -587,22 +612,15 @@ function renderInfo() {
   const d = homeList[homeSel];
   $('prevBtn').disabled = homeSel === 0;
   $('nextBtn').disabled = homeSel === homeList.length - 1;
-  const br = deckBracket(d);
+  const rows = [['Commander', esc(commanderName(d))], ['Bracket', deckBracket(d).level], ['Color Identity', identitySymbols(deckIdentity(d))]];
   // Show the value being sorted on when it isn't already one of the standard lines.
   const extra = { cost: ['Value', fmtUsd(deckValue(d))], created: ['Created', fmtDate(deckCreated(d))], recent: ['Last edited', fmtDate(d.updated)] }[homeSort.key];
-  $('deckInfo').innerHTML = `<div class="info-text"><div class="title-row"><div class="title">${esc(d.name)}</div>${optsBtn(d)}</div>
-    <div class="meta"><span class="lbl">Commander:</span> ${esc(commanderName(d))}</div>
-    <div class="meta"><span class="lbl">Bracket:</span> ${br.level}</div>
-    <div class="meta"><span class="lbl">Color Identity:</span> ${identitySymbols(deckIdentity(d))}</div>
-    ${extra ? `<div class="meta"><span class="lbl">${extra[0]}:</span> ${esc(extra[1])}</div>` : ''}</div>`;
+  if (extra) rows.push([extra[0], esc(extra[1])]);
+  $('deckInfo').innerHTML = infoHtml(`<div class="title">${esc(d.name)}</div>${optsBtn(d)}`, rows);
 }
 
-const deckIdentity = d => { const ids = new Set((d.commanders || []).flatMap(c => c.color_identity || [])); return [...WUBRG].filter(x => ids.has(x)); };
-const deckCover = d => d.commanders && d.commanders[0] && d.commanders[0].faces[0].image;
 const optsBtn = d => `<button class="opts-btn" data-deck-menu="${esc(d.id)}" aria-label="Options for ${esc(d.name)}" aria-haspopup="menu" aria-expanded="false">&#8943;</button>`;
-const openDeckPage = d => { if (d) location.hash = `deck=${d.id}`; };
-
-function activateSlide() { openDeckPage(homeList[homeSel]); }
+const activateSlide = () => openDeckPage(homeList[homeSel]);
 
 function deleteDeck(d) {
   if (!confirm(`Delete "${d.name}"? This cannot be undone.`)) return;
@@ -613,70 +631,90 @@ function deleteDeck(d) {
   renderHome();
 }
 
-/* ---------- Deck options menu ("⋯" in every landing view) ---------- */
+/* ---------- Floating menus ---------- */
 
-// One floating menu shared by every ⋯ button; the button's data-deck-menu holds the deck id.
-// Add future deck actions here and handle them in the click listener below.
-const deckMenu = document.createElement('div');
-deckMenu.className = 'card-menu deck-menu';
-deckMenu.hidden = true;
-deckMenu.setAttribute('role', 'menu');
-deckMenu.innerHTML = '<button role="menuitem" data-act="edit">Edit</button><button role="menuitem" class="danger" data-act="delete">Delete</button>';
-document.body.appendChild(deckMenu);
-let deckMenuFor = null; // the ⋯ button the menu belongs to
+// One fixed-position menu reused by every button that opens it. open(btn) anchors it under the
+// button (alignRight: flush with the button's right edge); onAct(action, btn) handles a choice.
+// It closes on an outside pointerdown, Escape (returning focus to the button), scroll and resize.
+function makeMenu(cls, html, onAct) {
+  const el = document.createElement('div');
+  el.className = cls ? `card-menu ${cls}` : 'card-menu';
+  el.hidden = true;
+  el.setAttribute('role', 'menu');
+  el.innerHTML = html;
+  document.body.appendChild(el);
+  const m = { anchor: null, isOpen: () => !el.hidden };
+  m.open = (btn, alignRight = false) => {
+    m.close();
+    m.anchor = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    el.hidden = false;
+    const r = btn.getBoundingClientRect();
+    el.style.top = `${Math.min(r.bottom + 4, innerHeight - el.offsetHeight - 4)}px`;
+    el.style.left = `${Math.max(4, Math.min(alignRight ? r.right - el.offsetWidth : r.left, innerWidth - el.offsetWidth - 4))}px`;
+    el.querySelector('button').focus();
+  };
+  m.close = (refocus = false) => {
+    if (el.hidden) return;
+    el.hidden = true;
+    if (m.anchor) {
+      m.anchor.setAttribute('aria-expanded', 'false');
+      if (refocus && m.anchor.isConnected) m.anchor.focus();
+    }
+    m.anchor = null;
+  };
+  m.toggle = (btn, alignRight) => { if (m.anchor === btn) m.close(); else m.open(btn, alignRight); };
+  el.addEventListener('click', e => {
+    const act = e.target.closest('[data-act]');
+    if (!act) return;
+    const btn = m.anchor;
+    m.close();
+    onAct(act.dataset.act, btn);
+  });
+  document.addEventListener('pointerdown', e => { if (!el.hidden && !el.contains(e.target) && !m.anchor.contains(e.target)) m.close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !el.hidden) m.close(true); });
+  document.addEventListener('scroll', () => m.close(), true); // the menu is fixed, so it would detach from its button
+  window.addEventListener('resize', () => m.close());
+  return m;
+}
 
-function openDeckMenu(btn) {
-  closeDeckMenu();
-  deckMenuFor = btn;
-  btn.setAttribute('aria-expanded', 'true');
-  deckMenu.hidden = false;
-  const r = btn.getBoundingClientRect();
-  deckMenu.style.top = `${Math.min(r.bottom + 4, innerHeight - deckMenu.offsetHeight - 4)}px`;
-  deckMenu.style.left = `${Math.max(4, Math.min(r.left, innerWidth - deckMenu.offsetWidth - 4))}px`;
-  deckMenu.querySelector('button').focus();
-}
-function closeDeckMenu(refocus = false) {
-  if (deckMenu.hidden) return;
-  deckMenu.hidden = true;
-  if (deckMenuFor) {
-    deckMenuFor.setAttribute('aria-expanded', 'false');
-    if (refocus && deckMenuFor.isConnected) deckMenuFor.focus();
-  }
-  deckMenuFor = null;
-}
-const deckMenuOpen = () => !deckMenu.hidden;
-document.addEventListener('pointerdown', e => {
-  if (deckMenuOpen() && !deckMenu.contains(e.target) && !e.target.closest('[data-deck-menu]')) closeDeckMenu();
-});
-$('home').addEventListener('scroll', () => closeDeckMenu(), true); // the menu is fixed, so it would detach from its button
-deckMenu.addEventListener('click', e => {
-  const act = e.target.closest('[data-act]')?.dataset.act;
-  if (!act) return;
-  const d = deckMenuFor && decks[deckMenuFor.dataset.deckMenu];
-  closeDeckMenu();
-  if (!d) return;
-  if (act === 'edit') openDeckPage(d);
-  else if (act === 'delete') deleteDeck(d);
-});
+// Deck options ("⋯" in every landing view); the button's data-deck-menu holds the deck id.
+// Add future deck actions here.
+const deckMenu = makeMenu('deck-menu',
+  '<button role="menuitem" data-act="edit">Edit</button><button role="menuitem" class="danger" data-act="delete">Delete</button>',
+  (act, btn) => {
+    const d = decks[btn.dataset.deckMenu];
+    if (!d) return;
+    if (act === 'edit') openDeckPage(d);
+    else if (act === 'delete') deleteDeck(d);
+  });
+
+// Card options ("⋯" on a deck row or tile).
+const cardMenu = makeMenu('',
+  '<button role="menuitem" data-act="print">Switch Printing</button><button role="menuitem" data-act="remove">Remove Card</button>',
+  (act, btn) => {
+    const id = btn.closest('[data-id]').dataset.id;
+    if (act === 'remove') { if (state.cards[id]) changeQty(id, -state.cards[id].qty); }
+    else if (cache.get(id)) openPrintings(cache.get(id));
+  });
 
 /* ---------- Landing views: carousel (default), gallery, list ---------- */
 
 const HOME_VIEWS = ['carousel', 'gallery', 'list'];
 let homeView = 'carousel';
-try {
-  const saved = localStorage.getItem('sparkritual.homeView');
+{
+  const saved = store.get('sparkritual.homeView');
   if (HOME_VIEWS.includes(saved)) homeView = saved;
-} catch { /* keep default */ }
+}
 $('homeView').value = homeView;
 $('homeView').addEventListener('change', e => {
   homeView = HOME_VIEWS.includes(e.target.value) ? e.target.value : 'carousel';
-  try { localStorage.setItem('sparkritual.homeView', homeView); } catch { /* not critical */ }
+  store.set('sparkritual.homeView', homeView);
   $('home').scrollTop = 0;
-  if (document.body.classList.contains('home')) renderHome();
+  if (bodyIs('home')) renderHome();
 });
 
 function renderGallery() {
-  setMusic(null);
   $('galleryView').innerHTML = homeList.length
     ? homeList.map((d, i) => {
       const img = deckCover(d);
@@ -693,11 +731,9 @@ const LIST_COLS = [
   ['name', 'Deck Name'], ['commander', 'Commander'], ['color', 'Color Identity'], ['bracket', 'Bracket'],
   ['cost', 'Value'], ['created', 'Created'], ['recent', 'Last Edited'],
 ];
-let homePreview = { deck: null, face: 0 };
 
 function renderList() {
-  setMusic(null);
-  const desc = !!HOME_SORTS[homeSort.key].desc !== homeSort.reversed;
+  const desc = sortIsDesc();
   const head = LIST_COLS.map(([k, label]) => {
     const on = k === homeSort.key;
     return `<th class="c-${k}" aria-sort="${on ? (desc ? 'descending' : 'ascending') : 'none'}"><button data-sort="${k}">${label}<span class="dir">${on ? (desc ? '↓' : '↑') : ''}</span></button></th>`;
@@ -715,20 +751,19 @@ function renderList() {
       </tr>`).join('')
     : `<tr><td colspan="${LIST_COLS.length + 1}" class="list-empty">No decks yet. <button data-new>Create a New Deck</button> to get started.</td></tr>`;
   $('deckTable').innerHTML = `<thead><tr>${head}<th class="c-opts"><span class="sr-only">Options</span></th></tr></thead><tbody>${body}</tbody>`;
-  homePreview = { deck: null, face: 0 }; // force a redraw (null never matches a deck or the empty-list undefined)
+  listDeck = null; // force a redraw (null never matches a deck or the empty-list undefined)
   showHomePreview(homeList[homeSel]);
 }
 
 // The list's preview panel shows the deck's commander, like the builder's card preview.
-// Without an explicit face, re-showing the deck already on screen is a no-op (keeps a flipped card flipped).
-function showHomePreview(d, face) {
-  if (homePreview.deck === d && (face === undefined || homePreview.face === face)) return;
-  face = face || 0;
-  homePreview = { deck: d, face };
-  const c = d && d.commanders && d.commanders[0];
-  $('homePreview').innerHTML = c
-    ? previewHtml(c, face, { identity: true })
-    : `<div class="preview-empty">${homeList.length ? 'Hover over a deck to preview its commander.' : 'Your decks will appear here.'}</div>`;
+// Re-showing the deck already on screen is a no-op (keeps a flipped card flipped).
+let listDeck = null;
+function showHomePreview(d) {
+  if (listDeck === d) return;
+  listDeck = d;
+  const c = d?.commanders?.[0];
+  if (c) listPreview.show(c);
+  else listPreview.clear(homeList.length ? 'Hover over a deck to preview its commander.' : 'Your decks will appear here.');
 }
 
 function selectListRow(i) {
@@ -751,16 +786,12 @@ $('deckTable').addEventListener('dblclick', e => {
   const row = e.target.closest('tr[data-i]');
   if (row && !e.target.closest('button')) openDeckPage(homeList[+row.dataset.i]);
 });
-$('homePreview').addEventListener('click', e => {
-  const c = homePreview.deck && homePreview.deck.commanders[0];
-  if (c && e.target.closest('[data-flip]')) showHomePreview(homePreview.deck, (homePreview.face + 1) % c.faces.length);
-});
 
 // Clicks shared by all three views.
 $('home').addEventListener('click', e => {
   const menuBtn = e.target.closest('[data-deck-menu]');
-  if (menuBtn) { deckMenuFor === menuBtn ? closeDeckMenu() : openDeckMenu(menuBtn); return; }
-  if (e.target.closest('[data-new]')) { $('newBtn').click(); return; }
+  if (menuBtn) { deckMenu.toggle(menuBtn); return; }
+  if (e.target.closest('[data-new]')) { openNewDeck(); return; }
   const sortBtn = e.target.closest('[data-sort]');
   if (sortBtn) { const k = sortBtn.dataset.sort; setHomeSort(k, k === homeSort.key ? !homeSort.reversed : false); return; }
   const open = e.target.closest('#galleryView [data-open]');
@@ -773,7 +804,7 @@ $('carousel').addEventListener('click', e => {
   if (swipeSuppressClick) { swipeSuppressClick = false; return; }
   const s = e.target.closest('.slide');
   if (!s) return;
-  if (s.classList.contains('placeholder')) { $('newBtn').click(); return; }
+  if (s.classList.contains('placeholder')) { openNewDeck(); return; }
   if (+s.dataset.i === homeSel) activateSlide(); else selectSlide(+s.dataset.i);
 });
 
@@ -818,58 +849,44 @@ $('carousel').addEventListener('pointercancel', () => { swipe = null; });
 $('prevBtn').addEventListener('click', () => selectSlide(homeTarget - 1));
 $('nextBtn').addEventListener('click', () => selectSlide(homeTarget + 1));
 
+// Keyboard navigation for the carousel (arrows in any direction) and the list (up/down).
+// The gallery's tiles are buttons, so Tab + Enter already opens a deck there.
+const CAROUSEL_KEYS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+const LIST_KEYS = { ArrowDown: 1, ArrowUp: -1 };
 document.addEventListener('keydown', e => {
-  if (!document.body.classList.contains('home') || document.querySelector('dialog[open]')) return;
-  if (deckMenuOpen()) { // the open options menu takes the keyboard; Escape closes it
-    if (e.key === 'Escape') closeDeckMenu(true);
-    return;
-  }
+  if (!bodyIs('home') || document.querySelector('dialog[open]') || deckMenu.isOpen()) return; // an open options menu takes the keyboard
   if (e.target.closest && e.target.closest('select, input, textarea')) return; // let the sort dropdown use its keys
-  if (homeView === 'gallery') return; // tiles are buttons; Tab + Enter opens a deck
-  if (homeView === 'list') {
-    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
-    if (step) { e.preventDefault(); selectListRow(homeSel + step); }
-    else if (e.key === 'Home') { e.preventDefault(); selectListRow(0); }
-    else if (e.key === 'End') { e.preventDefault(); selectListRow(homeList.length - 1); }
-    else if (e.key === 'Enter' && !e.target.closest('button')) homeList.length ? activateSlide() : $('newBtn').click();
-    return;
-  }
-  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-  if (step) { e.preventDefault(); selectSlide(homeTarget + step); }
-  else if (e.key === 'Home') selectSlide(0);
-  else if (e.key === 'End') selectSlide(homeList.length - 1);
-  else if (e.key === 'Enter' && !e.target.closest('button')) homeList.length ? activateSlide() : $('newBtn').click();
+  if (homeView === 'gallery') return;
+  const list = homeView === 'list';
+  const select = list ? selectListRow : selectSlide;
+  const step = (list ? LIST_KEYS : CAROUSEL_KEYS)[e.key];
+  if (step) { e.preventDefault(); select(homeTarget + step); }
+  else if (e.key === 'Home') { e.preventDefault(); select(0); }
+  else if (e.key === 'End') { e.preventDefault(); select(homeList.length - 1); }
+  else if (e.key === 'Enter' && !e.target.closest('button')) homeList.length ? activateSlide() : openNewDeck();
 });
 window.addEventListener('hashchange', route);
 
 // Decks saved before a field existed are re-fetched to fill it in.
 async function refreshStale() {
-  const all = [...state.commanders, ...Object.values(state.cards).map(e => e.card)];
-  const stale = all.filter(c => c.game_changer === undefined);
+  const stale = allCards(state.commanders, state.cards).filter(c => c.game_changer === undefined);
+  if (!stale.length) return;
   try {
-    for (let i = 0; i < stale.length; i += 75) {
-      (await collection(stale.slice(i, i + 75).map(c => ({ id: c.id })))).forEach(n => {
-        if (state.cards[n.id]) state.cards[n.id].card = n;
-        const k = state.commanders.findIndex(c => c.id === n.id);
-        if (k >= 0) state.commanders[k] = n;
-      });
-    }
+    (await collection(stale.map(c => ({ id: c.id })))).forEach(n => {
+      if (state.cards[n.id]) state.cards[n.id].card = n;
+      const k = state.commanders.findIndex(c => c.id === n.id);
+      if (k >= 0) state.commanders[k] = n;
+    });
   } catch { return; }
-  if (stale.length) { persist(); renderDeck(); }
+  persist(); renderDeck();
 }
 
 /* ---------- Sorting / grouping ---------- */
 
-const primaryCache = new WeakMap();
-function primaryType(c) {
-  let p = primaryCache.get(c);
-  if (p === undefined) {
-    const front = c.type_line.split(' // ')[0];
-    p = TYPE_PRIORITY.find(t => front.includes(t)) || 'Other';
-    primaryCache.set(c, p);
-  }
-  return p;
-}
+const primaryType = memo(c => {
+  const front = c.type_line.split(' // ')[0];
+  return TYPE_PRIORITY.find(t => front.includes(t)) || 'Other';
+});
 
 function colorGroup(c) {
   if (primaryType(c) === 'Land') return 'Land';
@@ -898,19 +915,15 @@ function groupCards(entries) {
 /* ---------- Rendering: deck ---------- */
 
 function renderCommanders() {
-  const box = $('commanderSlots');
-  const slots = [];
-  state.commanders.forEach((c, i) => {
-    slots.push(`<div class="slot filled ${selectedCard && selectedCard.id === c.id ? 'sel' : ''}" data-id="${c.id}">
+  const slots = state.commanders.map((c, i) => `<div class="slot filled${selectedCard?.id === c.id ? ' sel' : ''}" data-id="${c.id}">
       <span class="nm">${esc(c.name)}</span><span class="cost">${symbols(c.mana_cost)}</span>
       <button class="x-btn" data-remove-cmd="${i}" title="Remove" aria-label="Remove"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6"/></svg></button></div>`);
-  });
   if (!state.commanders.length) {
-    slots.push(`<div class="slot"><span class="nm label">No commander set.</span><button data-pick-main>Add</button></div>`);
+    slots.push('<div class="slot"><span class="nm label">No commander set.</span><button data-pick-cmd>Add</button></div>');
   } else if (secondSlotAvailable()) {
-    slots.push(`<div class="slot"><span class="nm label">Partner / Background (optional)</span><button data-pick-cmd>Add</button></div>`);
+    slots.push('<div class="slot"><span class="nm label">Partner / Background (optional)</span><button data-pick-cmd>Add</button></div>');
   }
-  box.innerHTML = slots.join('');
+  $('commanderSlots').innerHTML = slots.join('');
   $('identityLabel').innerHTML = state.commanders.length ? 'Identity: ' + identitySymbols(identity()) : '';
 }
 
@@ -927,12 +940,13 @@ function renderDeck() {
     (bad ? `<span class="bad">${bad} outside color identity</span>` : '') +
     (state.commanders.length ? '' : '<span class="bad">Commander required</span>');
 
+  const grid = viewMode.startsWith('grid');
+  const item = grid ? deckTile : deckRow;
   const html = groupCards(entries).map(([name, list]) => {
     const n = list.reduce((s, e) => s + e.qty, 0);
-    const cardView = viewMode.startsWith('grid');
-    return `<div class="group"><h3>${esc(name)} (${n})</h3><div class="items">${list.map(cardView ? deckTile : deckRow).join('')}</div></div>`;
+    return `<div class="group"><h3>${esc(name)} (${n})</h3><div class="items">${list.map(item).join('')}</div></div>`;
   }).join('');
-  $('deckList').className = `view-${viewMode}${viewStack && viewMode.startsWith('grid') ? ' stacked' : ''}`;
+  $('deckList').className = `view-${viewMode}${viewStack && grid ? ' stacked' : ''}`;
   $('deckList').innerHTML = html || '<div class="msg">Deck is empty.</div>';
   $('sortSelect').value = state.sort;
   renderCurve();
@@ -960,8 +974,7 @@ function dealHand() {
 function renderHand() {
   const has = hand.cards.length > 0;
   const info = has ? `${hand.library.length} cards in library` : '';
-  const cards = hand.cards.map(c => `<div class="hc" data-id="${c.id}">
-    <img src="${esc(c.faces[0].small)}" alt="${esc(c.name)}"></div>`).join('');
+  const cards = hand.cards.map(c => `<div class="hc" data-id="${c.id}"><img src="${esc(c.faces[0].small)}" alt="${esc(c.name)}"></div>`).join('');
   $('handActions').innerHTML = `<span class="hand-info">${info}</span>
     <button data-h="new">New Hand</button>
     <button data-h="draw" ${has && hand.library.length ? '' : 'disabled'}>Draw Card</button>`;
@@ -1024,30 +1037,29 @@ function renderCurve() {
     <div class="bars">${bars}</div>`;
 }
 
-let viewMode = localStorage.getItem('sparkritual.view') || 'list2';
-if (!['list', 'list2', 'grid-s', 'grid-m', 'grid-l'].includes(viewMode)) viewMode = 'list2';
-let viewStack = localStorage.getItem('sparkritual.stack') === '1';
+const VIEW_MODES = ['list', 'list2', 'grid-s', 'grid-m', 'grid-l'];
+let viewMode = store.get('sparkritual.view');
+if (!VIEW_MODES.includes(viewMode)) viewMode = 'list2';
+let viewStack = store.get('sparkritual.stack') === '1';
+
+// Shared by rows and tiles: legality + selection classes, and the hover action buttons.
+const itemClass = card => `${inIdentity(card) ? '' : ' illegal'}${selectedCard?.id === card.id ? ' sel' : ''}`;
+const itemActs = card => `<span class="acts">${isUnlimited(card) ? '<button data-qty="1" title="Add one">+</button>' : ''}<button data-menu title="Options" aria-haspopup="menu" aria-expanded="false">&#8943;</button></span>`;
 
 function deckTile({ card, qty }) {
-  const basic = isUnlimited(card);
-  return `<div class="tile ${inIdentity(card) ? '' : 'illegal'} ${selectedCard && selectedCard.id === card.id ? 'sel' : ''}" data-id="${card.id}">
+  return `<div class="tile${itemClass(card)}" data-id="${card.id}">
     <img loading="lazy" src="${esc(card.faces[0].image || card.faces[0].small)}" alt="${esc(card.name)}">
-    ${qty > 1 ? `<span class="tq">${qty}</span>` : ''}
-    <span class="acts">${basic ? `<button data-qty="1" title="Add one">+</button>` : ''}<button data-menu title="Options">&#8943;</button></span></div>`;
+    ${qty > 1 ? `<span class="tq">${qty}</span>` : ''}${itemActs(card)}</div>`;
 }
 
 function deckRow({ card, qty }) {
-  const basic = isUnlimited(card);
-  return `<div class="row ${inIdentity(card) ? '' : 'illegal'} ${selectedCard && selectedCard.id === card.id ? 'sel' : ''}" data-id="${card.id}">
+  return `<div class="row${itemClass(card)}" data-id="${card.id}">
     <span class="qty">${qty}</span><span class="nm">${esc(card.name)}</span>${card.game_changer ? GC_ICON : ''}
     <span class="cost">${symbols(card.mana_cost)}</span>
-    <span class="price">${card.prices.usd ? '$' + esc(card.prices.usd) : '&mdash;'}</span>
-    <span class="acts">${basic ? `<button data-qty="1" title="Add one">+</button>` : ''}<button data-menu title="Options">&#8943;</button></span></div>`;
+    <span class="price">${card.prices.usd ? '$' + esc(card.prices.usd) : '&mdash;'}</span>${itemActs(card)}</div>`;
 }
 
 /* ---------- Rendering: preview ---------- */
-
-let previewCard = null, previewFace = 0, selectedCard = null;
 
 function previewHtml(card, face, { identity = false, change = false } = {}) {
   const f = card.faces[face] || card.faces[0];
@@ -1072,19 +1084,40 @@ function previewHtml(card, face, { identity = false, change = false } = {}) {
     </div></div>`;
 }
 
-const inDeck = c => !!state.cards[c.id] || state.commanders.some(x => x.id === c.id);
-
-function showPreview(card, face = 0) {
-  previewCard = card; previewFace = face;
-  $('preview').innerHTML = previewHtml(card, face, { change: inDeck(card) });
+// A card preview panel. show(card, face) renders it, clear(text) shows a hint instead, and a click
+// on its Flip button turns the card over. `opts` are previewHtml options, or a function of the card.
+function makePreview(id, opts) {
+  const el = $(id);
+  const pv = { card: null, face: 0 };
+  pv.show = (card, face = 0) => {
+    pv.card = card; pv.face = face;
+    el.innerHTML = previewHtml(card, face, typeof opts === 'function' ? opts(card) : opts);
+  };
+  pv.clear = text => { pv.card = null; pv.face = 0; el.innerHTML = `<div class="preview-empty">${text}</div>`; };
+  el.addEventListener('click', e => {
+    if (pv.card && e.target.closest('[data-flip]')) pv.show(pv.card, (pv.face + 1) % pv.card.faces.length);
+  });
+  return pv;
 }
 
-// With nothing selected, the preview falls back to the commander.
+const inDeck = c => !!state.cards[c.id] || state.commanders.some(x => x.id === c.id);
+const preview = makePreview('preview', card => ({ change: inDeck(card) }));   // deck builder
+const listPreview = makePreview('homePreview', { identity: true });           // landing page, list view
+const draftPreview = makePreview('newPreview', { identity: true });           // new deck dialog
+let selectedCard = null;
+
+// With nothing hovered, the preview shows the selected card, else the commander, else a hint.
 function showDefaultPreview() {
-  const c = state.commanders[0];
-  if (c) return showPreview(c);
-  previewCard = null;
-  $('preview').innerHTML = '<div class="preview-empty">Hover over a card to preview it.</div>';
+  const c = selectedCard || state.commanders[0];
+  if (c) preview.show(c); else preview.clear('Hover over a card to preview it.');
+}
+
+// Clicking a deck card or commander pins it in the preview panel.
+function selectCard(c, el) {
+  selectedCard = c;
+  preview.show(c);
+  document.querySelectorAll('#builder .sel').forEach(x => x.classList.remove('sel'));
+  el.classList.add('sel');
 }
 
 /* ---------- Search ---------- */
@@ -1106,24 +1139,23 @@ function resetResults() {
 }
 
 async function runSearch() {
-  const msg = $('searchMsg');
   const text = $('searchInput').value.trim();
   search.text = text;
   resetResults();
   const token = ++search.token;
-  if (!state.commanders.length || !text) { msg.className = 'msg'; msg.textContent = ''; return []; }
-  msg.className = 'msg'; msg.textContent = 'Searching...';
+  if (!state.commanders.length || !text) { setMsg('searchMsg', ''); return []; }
+  setMsg('searchMsg', 'Searching...');
   try {
     const data = await scry(searchUrl(buildQuery(text)));
     if (token !== search.token) return [];
     const list = rank(data.data, text);
     search.list = list;
-    msg.textContent = list.length ? '' : 'No cards found.';
+    setMsg('searchMsg', list.length ? '' : 'No cards found.');
     search.url = data.next_page;
     appendResults(list);
     return list;
   } catch (e) {
-    if (token === search.token) { msg.className = 'msg err'; msg.textContent = e.message; }
+    if (token === search.token) setMsg('searchMsg', e.message, true);
     return [];
   }
 }
@@ -1138,7 +1170,7 @@ async function loadMore() {
     search.url = data.next_page;
     appendResults(data.data);
   } catch (e) {
-    $('searchMsg').className = 'msg err'; $('searchMsg').textContent = e.message;
+    setMsg('searchMsg', e.message, true);
   } finally { $('moreBtn').disabled = false; }
 }
 
@@ -1154,7 +1186,7 @@ function resultRow(c) {
     <span class="cost">${symbols(c.mana_cost)}</span></div>`;
 }
 
-const ownedNames = () => new Set([...Object.values(state.cards).map(e => e.card.name), ...state.commanders.map(c => c.name)]);
+const ownedNames = () => new Set(allCards(state.commanders, state.cards).map(c => c.name));
 const canAdd = (c, owned = ownedNames()) => isUnlimited(c) || !owned.has(c.name);
 
 function renderResultStates() {
@@ -1169,9 +1201,15 @@ function renderResultStates() {
   }
 }
 
+function pickResult(card) {
+  addCard(card);
+  clearSearch();
+}
+
 /* ---------- Partner / Background dialog ---------- */
 
 const dlg = $('cmdDialog');
+let partnerToken = 0;
 
 // Opens the commander picker: for the main commander when the deck has none, otherwise for a partner/background.
 function openPartnerDialog() {
@@ -1183,20 +1221,14 @@ function openPartnerDialog() {
 }
 
 async function searchPartners() {
-  const first = state.commanders[0];
-  const text = $('cmdInput').value.trim();
-  const msg = $('cmdMsg');
-  const q = (first ? `f:commander ${pairQuery(first)}` : 'is:commander -t:background') + nameClause(text);
-  msg.className = 'msg'; msg.textContent = 'Searching...';
+  setMsg('cmdMsg', 'Searching...');
   const token = ++partnerToken;
   try {
-    const data = await scry(searchUrl(q));
+    const list = (await searchCommanders(state.commanders[0], $('cmdInput').value.trim())).slice(0, 60);
     if (token !== partnerToken) return;
-    const list = data.data.filter(c => !first || canPair(first, c)).slice(0, 60);
-    msg.textContent = list.length ? '' : 'No matching cards.';
-    $('cmdResults').innerHTML = list.map(c => `<button class="cmd-card" data-cmd="${c.id}" title="${esc(c.name)}">
-      <img loading="lazy" src="${esc(c.faces[0].small)}" alt="${esc(c.name)}"><div>${esc(c.name)}</div></button>`).join('');
-  } catch (e) { msg.className = 'msg err'; msg.textContent = e.message; }
+    setMsg('cmdMsg', list.length ? '' : 'No matching cards.');
+    $('cmdResults').innerHTML = list.map(c => `<button class="cmd-card" data-cmd="${c.id}" title="${esc(c.name)}">${cardImg(c)}<div>${esc(c.name)}</div></button>`).join('');
+  } catch (e) { if (token === partnerToken) setMsg('cmdMsg', e.message, true); }
 }
 
 function setPartner(card) {
@@ -1218,7 +1250,7 @@ async function openPrintings(card) {
   $('printTitle').textContent = `Choose Printing: ${card.name}`;
   $('printFilter').value = '';
   $('printGrid').innerHTML = '';
-  $('printMsg').className = 'msg'; $('printMsg').textContent = 'Loading...';
+  setMsg('printMsg', 'Loading...');
   printDlg.showModal();
   try {
     if (!printsCache.has(card.name)) {
@@ -1229,15 +1261,14 @@ async function openPrintings(card) {
     }
     printList = printsCache.get(card.name);
     renderPrintings();
-  } catch (e) { $('printMsg').className = 'msg err'; $('printMsg').textContent = e.message; }
+  } catch (e) { setMsg('printMsg', e.message, true); }
 }
 
 function renderPrintings() {
   const q = $('printFilter').value.trim().toLowerCase();
   const rows = printList.filter(c => !q || `${c.set_name} ${c.set} ${c.collector} ${c.released.slice(0, 4)}`.toLowerCase().includes(q));
-  $('printMsg').textContent = rows.length ? `${rows.length} printing${rows.length === 1 ? '' : 's'}` : 'No matching printings.';
-  $('printGrid').innerHTML = rows.map(c => `<button class="cmd-card ${c.id === printTarget.id ? 'cur' : ''}" data-id="${c.id}">
-    <img loading="lazy" src="${esc(c.faces[0].small)}" alt="${esc(c.set_name)}">
+  setMsg('printMsg', rows.length ? `${rows.length} printing${rows.length === 1 ? '' : 's'}` : 'No matching printings.');
+  $('printGrid').innerHTML = rows.map(c => `<button class="cmd-card ${c.id === printTarget.id ? 'cur' : ''}" data-id="${c.id}">${cardImg(c, c.set_name)}
     <div class="pcap">${esc(c.set_name)}<br>${esc(c.set)} #${esc(c.collector)} &middot; ${c.prices.usd ? '$' + esc(c.prices.usd) : 'n/a'}</div></button>`).join('');
 }
 
@@ -1250,12 +1281,11 @@ function swapPrinting(oldCard, nu) {
     state.commanders[i] = nu;
   }
   refreshDeck();
-  if (selectedCard && selectedCard.id === oldCard.id) selectedCard = nu;
-  showPreview(nu, 0);
+  if (selectedCard?.id === oldCard.id) selectedCard = nu;
+  preview.show(nu);
 }
 
 $('printFilter').addEventListener('input', renderPrintings);
-$('printClose').addEventListener('click', () => printDlg.close());
 $('printGrid').addEventListener('click', e => {
   const b = e.target.closest('[data-id]');
   const nu = b && cache.get(b.dataset.id);
@@ -1269,37 +1299,19 @@ function hoverHandler(e) {
   const row = e.target.closest('[data-id]');
   if (!row) return;
   const c = cache.get(row.dataset.id);
-  if (c && c !== previewCard) showPreview(c);
+  if (c && c !== preview.card) preview.show(c);
 }
 
 ['deckList', 'searchResults', 'commanderSlots', 'hand'].forEach(id => {
   $(id).addEventListener('mouseover', hoverHandler);
   $(id).addEventListener('mouseleave', () => {
     const back = selectedCard || state.commanders[0];
-    if (back && back !== previewCard) selectedCard ? showPreview(back) : showDefaultPreview();
+    if (back && back !== preview.card) showDefaultPreview();
   });
 });
 
-const cardMenu = document.createElement('div');
-cardMenu.className = 'card-menu';
-cardMenu.hidden = true;
-cardMenu.innerHTML = '<button data-act="print">Switch Printing</button><button data-act="remove">Remove Card</button>';
-document.body.appendChild(cardMenu);
-let menuId = null;
-const closeMenu = () => { cardMenu.hidden = true; menuId = null; };
-document.addEventListener('click', e => { if (!cardMenu.contains(e.target) && !e.target.closest('[data-menu]')) closeMenu(); });
-cardMenu.addEventListener('click', e => {
-  const act = e.target.closest('[data-act]');
-  if (!act) return;
-  const id = menuId;
-  closeMenu();
-  if (act.dataset.act === 'remove') {
-    if (state.cards[id]) changeQty(id, -state.cards[id].qty);
-  } else if (cache.get(id)) openPrintings(cache.get(id));
-});
 $('preview').addEventListener('click', e => {
-  if (e.target.closest('[data-print]')) return openPrintings(previewCard);
-  if (e.target.closest('[data-flip]')) showPreview(previewCard, (previewFace + 1) % previewCard.faces.length);
+  if (e.target.closest('[data-print]')) openPrintings(preview.card);
 });
 
 function clearSearch() {
@@ -1307,20 +1319,18 @@ function clearSearch() {
   $('searchInput').value = '';
   search.text = '';
   resetResults();
-  $('searchMsg').textContent = '';
-  closeDrop();
+  setMsg('searchMsg', '');
+  setDrop(false);
 }
 
 $('searchResults').addEventListener('click', e => {
   const row = e.target.closest('[data-id]');
-  if (!row || row.classList.contains('owned')) return;
-  addCard(cache.get(row.dataset.id));
-  clearSearch();
+  if (row && !row.classList.contains('owned')) pickResult(cache.get(row.dataset.id));
 });
 
 // Clicking anywhere that isn't a card or an interactive element deselects the selected card.
 document.addEventListener('click', e => {
-  if (!selectedCard || document.body.classList.contains('home')) return;
+  if (!selectedCard || bodyIs('home')) return;
   if (e.target.closest('[data-id], [data-menu], button, input, textarea, select, a, label, summary, [tabindex], dialog, .card-menu')) return;
   selectedCard = null;
   document.querySelectorAll('#builder .sel').forEach(x => x.classList.remove('sel'));
@@ -1329,91 +1339,91 @@ document.addEventListener('click', e => {
 
 $('deckList').addEventListener('click', e => {
   const m = e.target.closest('[data-menu]');
-  if (m) {
-    const r = m.getBoundingClientRect();
-    menuId = m.closest('[data-id]').dataset.id;
-    cardMenu.hidden = false;
-    cardMenu.style.top = `${Math.min(r.bottom + 2, innerHeight - cardMenu.offsetHeight - 4)}px`;
-    cardMenu.style.left = `${Math.max(4, Math.min(r.right - cardMenu.offsetWidth, innerWidth - cardMenu.offsetWidth - 4))}px`;
-    return;
-  }
+  if (m) return cardMenu.toggle(m, true);
   const b = e.target.closest('[data-qty]');
   if (b) return changeQty(b.closest('[data-id]').dataset.id, +b.dataset.qty);
   const item = e.target.closest('[data-id]');
   const c = item && cache.get(item.dataset.id);
-  if (!c) return;
-  selectedCard = c;
-  showPreview(c);
-  document.querySelectorAll('#deckList .sel, #commanderSlots .sel').forEach(x => x.classList.remove('sel'));
-  item.classList.add('sel');
+  if (c) selectCard(c, item);
 });
 
 $('commanderSlots').addEventListener('click', e => {
-  if (e.target.closest('[data-pick-cmd], [data-pick-main]')) return openPartnerDialog();
+  if (e.target.closest('[data-pick-cmd]')) return openPartnerDialog();
   const r = e.target.closest('[data-remove-cmd]');
   if (r) {
     const i = +r.dataset.removeCmd;
     // Removing the first commander drops any dependent partner.
     const removed = state.commanders.splice(i, i === 0 ? state.commanders.length : 1);
-    if (selectedCard && removed.some(c => c.id === selectedCard.id)) selectedCard = null;
+    if (removed.some(c => c.id === selectedCard?.id)) selectedCard = null;
     refreshDeck(true);
-    if (selectedCard) showPreview(selectedCard); else showDefaultPreview();
+    showDefaultPreview();
     return;
   }
   // Clicking a commander selects it for the preview panel, like a deck card.
   const slot = e.target.closest('.slot[data-id]');
   const c = slot && cache.get(slot.dataset.id);
-  if (!c) return;
-  selectedCard = c;
-  showPreview(c);
-  document.querySelectorAll('#deckList .sel, #commanderSlots .sel').forEach(x => x.classList.remove('sel'));
-  slot.classList.add('sel');
+  if (c) selectCard(c, slot);
 });
 
 $('cmdResults').addEventListener('click', e => {
   const b = e.target.closest('[data-cmd]');
   if (b) setPartner(cache.get(b.dataset.cmd));
 });
-$('cmdClose').addEventListener('click', () => dlg.close());
 $('cmdInput').addEventListener('input', debounce(searchPartners, 300));
 
+const setDrop = open => $('searchDrop').classList.toggle('open', open);
 const onSearchInput = debounce(runSearch, 350);
-$('searchInput').addEventListener('input', () => { $('searchInput').value.trim() ? openDrop() : closeDrop(); onSearchInput(); });
-$('searchInput').addEventListener('focus', () => { if ($('searchInput').value.trim()) openDrop(); });
+$('searchInput').addEventListener('input', () => { setDrop(!!$('searchInput').value.trim()); onSearchInput(); });
+$('searchInput').addEventListener('focus', () => { if ($('searchInput').value.trim()) setDrop(true); });
 $('searchInput').addEventListener('keydown', async e => {
-  if (e.key === 'Escape') return closeDrop();
+  if (e.key === 'Escape') return setDrop(false);
   if (e.key !== 'Enter') return;
   e.preventDefault();
   onSearchInput.cancel();
   if ($('searchInput').value.trim() !== search.text) await runSearch();
   const owned = ownedNames();
   const hit = search.list.find(c => canAdd(c, owned));
-  if (!hit) return;
-  addCard(hit);
-  clearSearch();
+  if (hit) pickResult(hit);
 });
-$('searchBar').addEventListener('focusout', e => { if (!$('searchBar').contains(e.relatedTarget)) closeDrop(); });
+$('searchBar').addEventListener('focusout', e => { if (!$('searchBar').contains(e.relatedTarget)) setDrop(false); });
 // Keep input focus when clicking inside the dropdown.
 $('searchDrop').addEventListener('mousedown', e => e.preventDefault());
-
-function openDrop() { $('searchDrop').classList.add('open'); }
-function closeDrop() { $('searchDrop').classList.remove('open'); }
 $('moreBtn').addEventListener('click', loadMore);
+
+/* ---------- Dialog plumbing ---------- */
+
+// Every Close/Cancel button carries data-close; a button with data-dialog opens that dialog.
+// Dialogs that need setup before opening have their own handlers below.
+document.addEventListener('click', e => {
+  const close = e.target.closest('dialog [data-close]');
+  if (close) return close.closest('dialog').close();
+  const open = e.target.closest('[data-dialog]');
+  if (open) $(open.dataset.dialog).showModal();
+});
+
+// Copy button beside a text field; the label reports the result for a moment.
+function bindCopy(btnId, srcId, label) {
+  const b = $(btnId), src = $(srcId);
+  b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(src.value); b.textContent = 'Copied!'; }
+    catch { src.select(); b.textContent = 'Press Ctrl+C'; }
+    setTimeout(() => { b.textContent = label; }, 1500);
+  });
+}
 
 $('viewBtn').addEventListener('click', () => {
   document.querySelector(`input[name="viewMode"][value="${viewMode}"]`).checked = true;
   $('viewStack').checked = viewStack;
   $('viewDialog').showModal();
 });
-$('viewClose').addEventListener('click', () => $('viewDialog').close());
 $('viewDialog').addEventListener('change', e => {
   if (e.target.id === 'viewStack') {
     viewStack = e.target.checked;
-    localStorage.setItem('sparkritual.stack', viewStack ? '1' : '0');
+    store.set('sparkritual.stack', viewStack ? '1' : '0');
     return renderDeck();
   }
   viewMode = e.target.value;
-  localStorage.setItem('sparkritual.view', viewMode);
+  store.set('sparkritual.view', viewMode);
   renderDeck();
   $('viewDialog').close();
 });
@@ -1485,7 +1495,7 @@ async function setMusic(id) {
 }
 
 const playDeckMusic = debounce(() => {
-  if (!document.body.classList.contains('home')) return;
+  if (!bodyIs('home')) return;
   const d = homeView === 'carousel' && homeList[homeSel]; // the player box would cover the gallery and list
   setMusic(d && d.music ? ytId(d.music) : null);
 }, 600); // longer than the 450ms slide transition so YouTube loading never lands mid-animation
@@ -1546,20 +1556,15 @@ $('settingsBtn').addEventListener('click', () => {
   $('setName').value = state.name;
   $('setDesc').value = state.description;
   $('setMusic').value = state.music;
-  $('setMsg').textContent = '';
+  setMsg('setMsg', '');
   $('shareBox').hidden = !(Cloud.enabled && Cloud.user);
   $('setVis').value = state.visibility;
   $('shareLink').value = `${APP_URL}?d=${state.id}`;
   $('settingsDialog').showModal();
 });
-$('settingsClose').addEventListener('click', () => $('settingsDialog').close());
 $('settingsSave').addEventListener('click', () => {
   const music = $('setMusic').value.trim();
-  if (music && !ytId(music)) {
-    $('setMsg').className = 'msg err';
-    $('setMsg').textContent = 'Enter a valid YouTube video link.';
-    return;
-  }
+  if (music && !ytId(music)) return setMsg('setMsg', 'Enter a valid YouTube video link.', true);
   state.name = $('setName').value.trim() || 'Untitled Deck';
   state.description = $('setDesc').value.trim();
   state.music = music;
@@ -1569,6 +1574,7 @@ $('settingsSave').addEventListener('click', () => {
   showDeckTitle();
   $('settingsDialog').close();
 });
+bindCopy('shareCopy', 'shareLink', 'Copy link');
 
 /* ---------- Import / export ---------- */
 
@@ -1604,11 +1610,9 @@ function parseList(text) {
 async function fetchByNames(names) {
   const unique = [...new Set(names.map(n => n.toLowerCase()))];
   const byKey = new Map();
-  for (let i = 0; i < unique.length; i += 75) {
-    (await collection(unique.slice(i, i + 75).map(name => ({ name })))).forEach(c => {
-      c.name.toLowerCase().split(' // ').concat(c.name.toLowerCase()).forEach(k => byKey.set(k, c));
-    });
-  }
+  (await collection(unique.map(name => ({ name })))).forEach(c => {
+    c.name.toLowerCase().split(' // ').concat(c.name.toLowerCase()).forEach(k => byKey.set(k, c));
+  });
   return byKey;
 }
 
@@ -1625,61 +1629,57 @@ function buildCards(entries, cmdIds) {
   return { cards, dupes };
 }
 
-async function applyList() {
-  const msg = $('listMsg'), btn = $('listApply');
-  const parsed = parseList($('listText').value);
+// Parses the list in `textId`, looks every name up on Scryfall and hands the result to `apply`:
+// { parsed, find(name), missing: [names], entries: [{ card, qty }] }. Progress and errors go to `msgId`.
+async function importList(textId, msgId, btnId, apply) {
+  const msg = $(msgId), btn = $(btnId);
+  const parsed = parseList($(textId).value);
   const names = [...parsed.commanders, ...parsed.cards.map(c => c.name)];
-  msg.className = 'msg';
-  if (!names.length) { msg.textContent = 'Nothing to import.'; return; }
-  msg.textContent = 'Importing...'; btn.disabled = true;
+  if (!names.length) return setMsg(msg, 'Nothing to import.');
+  setMsg(msg, 'Importing...'); btn.disabled = true;
   try {
     const found = await fetchByNames(names);
     const find = n => found.get(n.toLowerCase());
-    const missing = names.filter(n => !find(n));
-    let commanders = parsed.commanders.length ? parsed.commanders.map(find).filter(Boolean).slice(0, 2) : state.commanders;
+    const missing = [...new Set(names.filter(n => !find(n)))];
+    const entries = parsed.cards.map(e => ({ card: find(e.name), qty: e.qty }));
+    await apply({ parsed, find, missing, entries });
+  } catch (e) {
+    setMsg(msg, e.message, true);
+  } finally { btn.disabled = false; }
+}
+
+function applyList() {
+  return importList('listText', 'listMsg', 'listApply', ({ parsed, find, missing, entries }) => {
+    const commanders = parsed.commanders.length ? parsed.commanders.map(find).filter(Boolean).slice(0, 2) : state.commanders;
     if (!commanders.length) throw new Error('A valid commander is required (add a "Commander" heading).');
     if (commanders.length === 2 && !canPair(commanders[0], commanders[1])) throw new Error('Those two commanders cannot be paired.');
-    const cmdIds = new Set(commanders.map(c => c.id));
-    const { cards, dupes } = buildCards(parsed.cards.map(e => ({ card: find(e.name), qty: e.qty })), cmdIds);
+    const { cards, dupes } = buildCards(entries, new Set(commanders.map(c => c.id)));
     Object.assign(state, { commanders, cards });
     refreshDeck(true);
     const notes = [];
-    if (missing.length) notes.push(`Not found: ${[...new Set(missing)].join(', ')}`);
+    if (missing.length) notes.push(`Not found: ${missing.join(', ')}`);
     if (dupes) notes.push(`${dupes} duplicate(s) skipped (singleton)`);
-    if (notes.length) { msg.textContent = `Imported. ${notes.join('. ')}.`; $('listText').value = exportText(); }
+    if (notes.length) { setMsg('listMsg', `Imported. ${notes.join('. ')}.`); $('listText').value = exportText(); }
     else listDlg.close();
-  } catch (e) {
-    msg.className = 'msg err'; msg.textContent = e.message;
-  } finally { btn.disabled = false; }
+  });
 }
 
 $('listBtn').addEventListener('click', () => {
   $('listText').value = exportText();
-  $('listMsg').textContent = '';
+  setMsg('listMsg', '');
   listDlg.showModal();
 });
-$('listClose').addEventListener('click', () => listDlg.close());
 $('listApply').addEventListener('click', applyList);
-$('listCopy').addEventListener('click', async () => {
-  const b = $('listCopy');
-  try { await navigator.clipboard.writeText($('listText').value); b.textContent = 'Copied!'; }
-  catch { b.textContent = 'Copy failed'; }
-  setTimeout(() => { b.textContent = 'Copy'; }, 1500);
-});
+bindCopy('listCopy', 'listText', 'Copy');
 
 /* ---------- New deck dialog ---------- */
 
 const newDlg = $('newDialog');
-const draft = { card: null, partner: null, target: 'cmd', face: 0, shown: null, token: 0, importText: '', imported: [] };
-
-function showDraftPreview(card, face = 0) {
-  draft.shown = card; draft.face = face;
-  $('newPreview').innerHTML = previewHtml(card, face, { identity: true });
-}
+const draft = { card: null, partner: null, target: 'cmd', token: 0, importText: '', imported: [] };
 
 function restoreDraftPreview() {
   const selected = (draft.target === 'partner' && draft.partner) || draft.card;
-  if (selected && selected !== draft.shown) showDraftPreview(selected);
+  if (selected && selected !== draftPreview.card) draftPreview.show(selected);
 }
 
 function updateDraftUi() {
@@ -1703,39 +1703,34 @@ function setDraftTarget(t) {
 }
 
 function openNewDeck() {
-  Object.assign(draft, { card: null, partner: null, target: 'cmd', shown: null, importText: '', imported: [] });
+  Object.assign(draft, { card: null, partner: null, target: 'cmd', importText: '', imported: [] });
   $('newName').value = '';
   $('newSearch').value = '';
   updateDraftUi();
-  $('newPreview').innerHTML = '<div class="preview-empty">Hover over a commander to preview it.</div>';
+  draftPreview.clear('Hover over a commander to preview it.');
   newDlg.showModal();
   searchNewCommander();
   $('newName').focus();
 }
 
 async function searchNewCommander() {
-  const text = $('newSearch').value.trim();
   const second = draft.target === 'partner' && draft.card;
-  const q = (second ? `f:commander ${pairQuery(draft.card)}` : 'is:commander -t:background') + nameClause(text);
-  const msg = $('newMsg');
-  msg.className = 'msg'; msg.textContent = 'Searching...';
+  setMsg('newMsg', 'Searching...');
   const token = ++draft.token;
   try {
-    const data = await scry(searchUrl(q));
+    const list = (await searchCommanders(second || null, $('newSearch').value.trim())).slice(0, 80);
     if (token !== draft.token) return;
-    const list = (second ? data.data.filter(c => canPair(draft.card, c)) : data.data).slice(0, 80);
     const picked = second ? draft.partner : draft.card;
-    msg.textContent = list.length ? '' : 'No legal matches found.';
-    $('newResults').innerHTML = list.map(c => `<div class="row ${picked && picked.id === c.id ? 'selected' : ''}" data-id="${c.id}">
+    setMsg('newMsg', list.length ? '' : 'No legal matches found.');
+    $('newResults').innerHTML = list.map(c => `<div class="row${picked?.id === c.id ? ' sel' : ''}" data-id="${c.id}">
       <span class="nm">${esc(c.name)}</span>
       <span class="cost">${identitySymbols(c.color_identity)}</span></div>`).join('');
   } catch (e) {
-    if (token === draft.token) { msg.className = 'msg err'; msg.textContent = e.message; }
+    if (token === draft.token) setMsg('newMsg', e.message, true);
   }
 }
 
 $('newBtn').addEventListener('click', openNewDeck);
-$('newCancel').addEventListener('click', () => newDlg.close());
 $('newSearch').addEventListener('input', debounce(searchNewCommander, 300));
 $('tabCmd').addEventListener('click', () => setDraftTarget('cmd'));
 $('tabPartner').addEventListener('click', () => setDraftTarget('partner'));
@@ -1743,7 +1738,7 @@ $('tabPartner').addEventListener('click', () => setDraftTarget('partner'));
 $('newResults').addEventListener('mouseover', e => {
   const row = e.target.closest('[data-id]');
   const c = row && cache.get(row.dataset.id);
-  if (c && c !== draft.shown) showDraftPreview(c);
+  if (c && c !== draftPreview.card) draftPreview.show(c);
 });
 $('newResults').addEventListener('mouseout', e => {
   const row = e.target.closest('[data-id]');
@@ -1756,18 +1751,15 @@ $('newResults').addEventListener('click', e => {
   const c = cache.get(row.dataset.id);
   if (draft.target === 'partner') {
     // Clicking the chosen partner again clears it.
-    draft.partner = draft.partner && draft.partner.id === c.id ? null : c;
+    draft.partner = draft.partner?.id === c.id ? null : c;
   } else {
     draft.card = c;
     if (draft.partner && !canPair(c, draft.partner)) draft.partner = null;
   }
   const picked = draft.target === 'partner' ? draft.partner : draft.card;
-  document.querySelectorAll('#newResults .row').forEach(r => r.classList.toggle('selected', !!picked && r.dataset.id === picked.id));
+  document.querySelectorAll('#newResults .row').forEach(r => r.classList.toggle('sel', !!picked && r.dataset.id === picked.id));
   updateDraftUi();
-  showDraftPreview(c);
-});
-$('newPreview').addEventListener('click', e => {
-  if (e.target.closest('[data-flip]')) showDraftPreview(draft.shown, (draft.face + 1) % draft.shown.faces.length);
+  draftPreview.show(c);
 });
 
 $('newCreate').addEventListener('click', () => {
@@ -1780,49 +1772,33 @@ $('newCreate').addEventListener('click', () => {
 
 const importDlg = $('newImportDialog');
 
-async function applyNewImport() {
-  const msg = $('newImportMsg'), btn = $('newImportApply');
-  const parsed = parseList($('newImportText').value);
-  const names = [...parsed.commanders, ...parsed.cards.map(c => c.name)];
-  msg.className = 'msg';
-  if (!names.length) { msg.textContent = 'Nothing to import.'; return; }
-  msg.textContent = 'Importing...'; btn.disabled = true;
-  try {
-    const found = await fetchByNames(names);
-    const find = n => found.get(n.toLowerCase());
-    const missing = names.filter(n => !find(n));
+function applyNewImport() {
+  return importList('newImportText', 'newImportMsg', 'newImportApply', ({ parsed, find, missing, entries }) => {
     if (!draft.card && parsed.commanders.length) {
       const [first, second] = parsed.commanders.map(find).filter(Boolean);
       if (first) {
         draft.card = first;
         draft.partner = second && canPair(first, second) ? second : null;
-        draft.target = 'cmd';
-        $('newSearch').value = '';
-        searchNewCommander();
+        setDraftTarget('cmd');
       }
     }
     draft.importText = $('newImportText').value;
-    draft.imported = parsed.cards.map(e => ({ card: find(e.name), qty: e.qty })).filter(e => e.card);
+    draft.imported = entries.filter(e => e.card);
     updateDraftUi();
-    if (missing.length) {
-      msg.className = 'msg err';
-      msg.textContent = `Not found: ${[...new Set(missing)].join(', ')}. The rest will be added when the deck is created.`;
-    } else importDlg.close();
-  } catch (e) {
-    msg.className = 'msg err'; msg.textContent = e.message;
-  } finally { btn.disabled = false; }
+    if (missing.length) setMsg('newImportMsg', `Not found: ${missing.join(', ')}. The rest will be added when the deck is created.`, true);
+    else importDlg.close();
+  });
 }
 
 $('newImport').addEventListener('click', () => {
   $('newImportText').value = draft.importText;
-  $('newImportMsg').textContent = '';
+  setMsg('newImportMsg', '');
   importDlg.showModal();
 });
-$('newImportClose').addEventListener('click', () => importDlg.close());
 $('newImportClear').addEventListener('click', () => {
   $('newImportText').value = '';
   draft.importText = ''; draft.imported = [];
-  $('newImportMsg').textContent = '';
+  setMsg('newImportMsg', '');
   updateDraftUi();
 });
 $('newImportApply').addEventListener('click', applyNewImport);
@@ -1832,29 +1808,25 @@ function setSearchEnabled() {
   $('searchInput').disabled = !on;
   $('searchInput').placeholder = on ? 'Search for cards to add to the deck' : 'Create a deck to start searching';
 }
+
 /* ---------- Online decks (Supabase) ---------- */
 
-const APP_URL = location.href.split(/[?#]/)[0];
 const cloudTimers = new Map(); // deck id -> pending push timer
 const lastPushed = new Map();  // deck id -> signature of the last row we know the server has
 let sharedInfo = null, sharedTok = 0;
 
 const rowSig = row => JSON.stringify({ ...row, updated_at: 0 });
-
-function setSync(text, bad) {
-  const s = $('syncState');
-  s.textContent = text;
-  s.classList.toggle('bad', !!bad);
-}
+const setSync = (text, bad) => setMsg('syncState', text, bad);
 
 function updateAuthUi() {
   $('authBtn').hidden = !Cloud.enabled;
-  $('authLabel').textContent = Cloud.user ? ((Cloud.profile && Cloud.profile.display_name) || 'Account') : 'Log in';
+  $('authLabel').textContent = Cloud.user ? (Cloud.profile?.display_name || 'Account') : 'Log in';
+  updateCopyBtn();
 }
 
 function updateCopyBtn() {
   if (!sharedInfo) return;
-  const own = !!Cloud.user && Cloud.user.id === sharedInfo.ownerId;
+  const own = Cloud.user?.id === sharedInfo.ownerId;
   $('copyBtn').textContent = own ? 'Open in editor' : 'Copy to my decks';
 }
 
@@ -1890,8 +1862,7 @@ async function pushNow(id) {
 // Rows hold only Scryfall ids; rebuild full card objects (cache first, then batched lookups).
 async function hydrate(row) {
   const ids = [...new Set([...row.commanders, ...Object.keys(row.cards)])];
-  const need = ids.filter(id => !cache.has(id));
-  for (let i = 0; i < need.length; i += 75) await collection(need.slice(i, i + 75).map(id => ({ id })));
+  await collection(ids.filter(id => !cache.has(id)).map(id => ({ id })));
   const cards = {};
   for (const [id, qty] of Object.entries(row.cards)) if (cache.has(id)) cards[id] = { card: cache.get(id), qty };
   return {
@@ -1926,7 +1897,7 @@ async function syncDown(askUpload) {
       guest.forEach(d => { d.owner = user.id; queueCloud(d.id); });
     }
     writeDecks();
-    if (document.body.classList.contains('home')) renderHome();
+    if (bodyIs('home')) renderHome();
     setSync('Synced');
   } catch (e) { setSync('Sync failed: ' + e.message, true); }
 }
@@ -1940,11 +1911,11 @@ function signedOutCleanup() {
   mine.forEach(id => delete decks[id]);
   if (mine.length) writeDecks();
   setSync('');
-  if (document.body.classList.contains('shared')) return updateCopyBtn();
+  if (bodyIs('shared')) return;
   if (state.id && !decks[state.id]) {
     state.id = null;
     if (location.hash) location.hash = ''; else route();
-  } else if (document.body.classList.contains('home')) renderHome();
+  } else if (bodyIs('home')) renderHome();
 }
 
 /* Shared (read-only) deck page: ?d=<deck id> */
@@ -1970,10 +1941,7 @@ async function openShared(id) {
     document.title = `${d.name} - SparkRitual`;
     $('deckTitle').textContent = `${d.name} by ${row.owner}`;
     $('sharedDesc').textContent = d.description || '';
-    previewCard = null; selectedCard = null;
-    dealHand();
-    showDefaultPreview();
-    renderDeck();
+    resetBuilder();
     updateCopyBtn();
   } catch (e) {
     if (tok !== sharedTok) return;
@@ -1985,20 +1953,20 @@ async function openShared(id) {
 $('copyBtn').addEventListener('click', () => {
   const s = sharedInfo;
   if (!s) return;
-  const own = !!Cloud.user && Cloud.user.id === s.ownerId;
+  const own = Cloud.user?.id === s.ownerId;
   const id = own ? s.source.id : newId();
   if (!decks[id]) {
     const d = structuredClone(s.source);
-    Object.assign(d, { id, name: own ? d.name : `${d.name} (copy)`, visibility: own ? d.visibility : 'private', owner: Cloud.user ? Cloud.user.id : undefined, updated: Date.now() });
+    Object.assign(d, { id, name: own ? d.name : `${d.name} (copy)`, visibility: own ? d.visibility : 'private', owner: Cloud.user?.id, updated: Date.now() });
     decks[id] = d;
     writeDecks();
     if (d.owner) queueCloud(id);
   }
-  location.hash = `deck=${id}`;
+  gotoDeck(id);
 });
 
 document.querySelector('.topbar h1 a').addEventListener('click', e => {
-  if (!document.body.classList.contains('shared')) return;
+  if (!bodyIs('shared')) return;
   e.preventDefault();
   history.replaceState(null, '', APP_URL);
   route();
@@ -2009,12 +1977,11 @@ document.querySelector('.topbar h1 a').addEventListener('click', e => {
 // A modal <dialog> sliding in from the left: the browser handles the backdrop, focus trapping and Escape.
 const sideNav = $('sideNav');
 $('menuBtn').addEventListener('click', () => {
-  closeDeckMenu();
+  deckMenu.close();
   sideNav.showModal();
   $('menuBtn').setAttribute('aria-expanded', 'true');
 });
 sideNav.addEventListener('close', () => $('menuBtn').setAttribute('aria-expanded', 'false'));
-$('sideNavClose').addEventListener('click', () => sideNav.close());
 sideNav.addEventListener('click', e => {
   // The panel's content fills the dialog, so a click landing on the dialog itself is on the backdrop.
   if (e.target === sideNav) return sideNav.close();
@@ -2022,34 +1989,28 @@ sideNav.addEventListener('click', e => {
   if (e.target.closest('.side-nav-item')) sideNav.close();
 }, true);
 
-$('appSettingsBtn').addEventListener('click', () => $('appSettingsDialog').showModal());
-$('aboutBtn').addEventListener('click', () => $('aboutDialog').showModal());
-$('aboutClose').addEventListener('click', () => $('aboutDialog').close());
-
 // Dark mode is the default; only the light choice is stored (index.html applies it before first paint).
 $('darkModeToggle').checked = document.documentElement.dataset.theme !== 'light';
 $('darkModeToggle').addEventListener('change', e => {
   const dark = e.target.checked;
   if (dark) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = 'light';
-  try { dark ? localStorage.removeItem('sparkritual.theme') : localStorage.setItem('sparkritual.theme', 'light'); } catch { /* not critical */ }
+  store.set('sparkritual.theme', dark ? null : 'light');
 });
-$('appSettingsClose').addEventListener('click', () => $('appSettingsDialog').close());
 
 /* Account dialog */
 
 const authDlg = $('authDialog');
-const authMsg = (t, bad) => { $('authMsg').textContent = t; $('authMsg').className = 'msg' + (bad ? ' err' : ''); };
+const authMsg = (t, bad) => setMsg('authMsg', t, bad);
 
 $('authBtn').addEventListener('click', () => {
   const on = !!Cloud.user;
   $('authTitle').textContent = on ? 'Account' : 'Sign in';
   $('authOut').hidden = on;
   $('authIn').hidden = !on;
-  $('authName').value = (Cloud.profile && Cloud.profile.display_name) || '';
+  $('authName').value = Cloud.profile?.display_name || '';
   authMsg('');
   authDlg.showModal();
 });
-$('authClose').addEventListener('click', () => authDlg.close());
 $('authSend').addEventListener('click', async () => {
   const email = $('authEmail').value.trim();
   if (!email) return authMsg('Enter your email address.', true);
@@ -2070,19 +2031,11 @@ $('authOutBtn').addEventListener('click', async () => {
   try { await Cloud.signOut(); authDlg.close(); } catch (e) { authMsg(e.message, true); }
 });
 
-$('shareCopy').addEventListener('click', async () => {
-  const b = $('shareCopy');
-  try { await navigator.clipboard.writeText($('shareLink').value); b.textContent = 'Copied!'; }
-  catch { $('shareLink').select(); b.textContent = 'Press Ctrl+C'; }
-  setTimeout(() => { b.textContent = 'Copy link'; }, 1500);
-});
-
 Cloud.onAuth(async user => {
   updateAuthUi();
-  updateCopyBtn();
   if (user) await syncDown(true); else signedOutCleanup();
 });
-Cloud.ready.then(() => { updateAuthUi(); updateCopyBtn(); syncDown(false); });
+Cloud.ready.then(() => { updateAuthUi(); syncDown(false); });
 
 loadDecks();
 route();
