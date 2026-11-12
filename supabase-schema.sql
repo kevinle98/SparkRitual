@@ -45,15 +45,28 @@ returns json language sql security definer set search_path = public stable as $$
 $$;
 grant execute on function public.get_deck(text) to anon, authenticated;
 
--- Create a profile automatically on sign-up, with a unique name derived from the email.
+-- Create a profile automatically on sign-up, with a unique display name.
+-- Discord sign-ups use their Discord username; everyone else (email link, Google)
+-- uses the part of the email before the @, so real names from Google are never published.
+-- Safe to re-run on its own to update an existing project.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
-  base text := left(coalesce(nullif(regexp_replace(split_part(new.email, '@', 1), '[^A-Za-z0-9_]', '', 'g'), ''), 'player'), 24);
+  meta jsonb := coalesce(new.raw_user_meta_data, '{}');
+  candidates text[] := array[]::text[];
+  c text;
+  base text := 'player';
   n text;
   i int := 0;
 begin
-  if char_length(base) < 2 then base := 'player'; end if;
+  if new.raw_app_meta_data->>'provider' = 'discord' then
+    candidates := array[meta->>'full_name', split_part(meta->>'name', '#', 1)];
+  end if;
+  candidates := candidates || split_part(coalesce(new.email, ''), '@', 1);
+  foreach c in array candidates loop
+    c := left(regexp_replace(coalesce(c, ''), '[^A-Za-z0-9_]', '', 'g'), 24);
+    if char_length(c) >= 2 then base := c; exit; end if;
+  end loop;
   n := base;
   while exists (select 1 from public.profiles where display_name = n) loop
     i := i + 1; n := base || i;

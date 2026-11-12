@@ -11,6 +11,19 @@ const Cloud = (() => {
   const redirect = () => location.href.split(/[?#]/)[0];
   const check = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
 
+  // A failed OAuth sign-in comes back as ?error=... (or #error=...). Grab the message
+  // and strip those params now, before app.js routes on the URL.
+  api.authError = (() => {
+    const q = new URLSearchParams(location.search), h = new URLSearchParams(location.hash.slice(1));
+    const p = q.has('error') ? q : h.has('error') ? h : null;
+    if (!p) return null;
+    const msg = p.get('error_description') || p.get('error');
+    ['error', 'error_code', 'error_description'].forEach(k => p.delete(k));
+    const s = q.toString(), hs = p === h ? h.toString() : location.hash.slice(1);
+    history.replaceState(history.state, '', location.pathname + (s ? '?' + s : '') + (hs ? '#' + hs : ''));
+    return msg;
+  })();
+
   async function setUser(user) {
     api.user = user;
     api.profile = null;

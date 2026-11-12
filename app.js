@@ -1926,8 +1926,17 @@ $('authSend').addEventListener('click', async () => {
   catch (e) { authMsg(e.message, true); }
   finally { $('authSend').disabled = false; }
 });
-authDlg.querySelectorAll('[data-provider]').forEach(b =>
-  b.addEventListener('click', () => Cloud.signInOAuth(b.dataset.provider).catch(e => authMsg(e.message, true))));
+const oauthBtns = authDlg.querySelectorAll('[data-provider]');
+const setOAuthBusy = on => oauthBtns.forEach(x => { x.disabled = on; });
+oauthBtns.forEach(b => b.addEventListener('click', async () => {
+  setOAuthBusy(true);
+  authMsg('Redirecting...');
+  // On success the browser leaves the page, so only the failure path needs to reset.
+  try { await Cloud.signInOAuth(b.dataset.provider); }
+  catch (e) { setOAuthBusy(false); authMsg(e.message, true); }
+}));
+// Coming back with the Back button can restore the page from cache with the buttons still disabled.
+window.addEventListener('pageshow', e => { if (e.persisted) { setOAuthBusy(false); authMsg(''); } });
 $('authSave').addEventListener('click', async () => {
   try { await Cloud.setDisplayName($('authName').value.trim()); updateAuthUi(); authMsg('Saved.'); }
   catch (e) { authMsg(e.message, true); }
@@ -1941,7 +1950,14 @@ Cloud.onAuth(async user => {
   updateAuthUi();
   if (user) await syncDown(true); else signedOutCleanup();
 });
-Cloud.ready.then(() => { updateAuthUi(); syncDown(false); });
+Cloud.ready.then(() => {
+  updateAuthUi();
+  syncDown(false);
+  if (Cloud.enabled && Cloud.authError && !Cloud.user) {
+    $('authBtn').click();
+    authMsg(`Sign-in failed: ${Cloud.authError}`, true);
+  }
+});
 
 loadDecks();
 route();

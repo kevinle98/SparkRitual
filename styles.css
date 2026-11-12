@@ -239,7 +239,8 @@ dialog textarea { width: 100%; height: 50vh; resize: vertical; font: 15.6px/1.5 
 .share-row input { flex: 1; }
 #shareBox select { width: 100%; }
 .auth-alt { display: flex; gap: 8px; flex-wrap: wrap; }
-.auth-alt button { flex: 1; }
+.auth-alt button { flex: 1; gap: 8px; white-space: nowrap; }
+.auth-alt svg { width: 18px; height: 18px; flex: none; }
 
 /* landing page */
 body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.home) .home-only { display: none; }
