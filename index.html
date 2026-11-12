@@ -9,18 +9,28 @@
 
     <title>SparkRitual - Commander Deck Builder</title>
 
+    <!-- Pages live at paths like /decks/abc, so assets must resolve from the app's root folder.
+         If SparkRitual sits in a subfolder of the domain, change "/" to "/that-folder/". -->
+    <script>if (location.protocol !== 'file:') document.write('<base href="/">');</script>
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <script>try { if (localStorage.getItem('sparkritual.theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}</script>
-    <link rel="stylesheet" href="styles.css?v=20261111">
+    <link rel="stylesheet" href="styles.css?v=20261111k">
   </head>
 
   <body class="home">
+    <!-- Loading screen: visible from the first paint; app.js hides it once the landing page is ready. -->
+    <div id="loading" class="loading" role="status">
+      <svg viewBox="-232 -232 464 464" aria-hidden="true"><circle cx="0" cy="-136" r="94"/><circle cx="-117.8" cy="68" r="94" opacity=".7"/><circle cx="117.8" cy="68" r="94" opacity=".4"/></svg>
+      <div class="loading-text">Untapping lands...</div>
+    </div>
+    <svg hidden><symbol id="ico-google" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></symbol><symbol id="ico-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></symbol></svg>
     <header class="topbar">
       <button id="menuBtn" class="menu-btn" aria-label="Open menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="sideNav">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
       </button>
       <h1><a href="#"><img class="logo" src="logo.svg" alt=""><span class="brand-text">SparkRitual</span></a></h1>
       <span id="deckTitle" class="deck-title builder-only"></span>
+      <span id="profileTitle" class="deck-title profile-only"></span>
       <input id="deckNameInput" class="deck-name-input builder-only" type="text" maxlength="100" spellcheck="false" autocomplete="off" aria-label="Deck name" title="Click to rename">
       <div class="spacer"></div>
       <label class="builder-only">Sort
@@ -70,6 +80,63 @@
       <div class="list-view">
         <aside class="panel preview" id="homePreview"></aside>
         <div class="panel deck-table-wrap" id="deckTableWrap"><table id="deckTable" class="deck-table"></table></div>
+      </div>
+    </main>
+
+    <main class="account-page" id="account" hidden>
+      <div class="account-inner">
+        <h2>Account Settings</h2>
+
+        <section class="panel acct-card">
+          <h3>Profile</h3>
+          <label class="field">Display name
+            <input id="acctName" type="text" maxlength="32" autocomplete="off" spellcheck="false" aria-describedby="acctNameMsg">
+          </label>
+          <div id="acctNameMsg" class="msg">Shown on decks you share.</div>
+        </section>
+
+        <section class="panel acct-card">
+          <h3>Deck visibility</h3>
+          <label class="choice"><input type="radio" name="acctVis" value="1">
+            <span><strong>Visible</strong><small>Decks you set to Unlisted or Public can be opened by others, and are listed on your public page.</small></span></label>
+          <label class="choice"><input type="radio" name="acctVis" value="0">
+            <span><strong>Hidden</strong><small>No one else can open any of your decks, whatever each deck's own setting. Existing share links and your public page stop working until you switch back.</small></span></label>
+          <div id="acctPublic" class="field acct-public" hidden>
+            Your public page
+            <div class="share-row"><input id="acctPublicLink" type="text" readonly><button id="acctPublicCopy">Copy link</button></div>
+            <small>This link uses your display name, so it changes if you rename yourself.</small>
+          </div>
+        </section>
+
+        <div class="acct-actions">
+          <span id="acctMsg" class="msg"></span>
+          <button id="acctDiscard">Discard changes</button>
+          <button id="acctSave" class="apply">Save changes</button>
+        </div>
+
+        <section class="panel acct-card">
+          <h3>Sign-in methods</h3>
+          <div class="msg">Link another account to sign in to these same decks with it. Linking and unlinking take effect immediately.</div>
+          <div id="authLinks"></div>
+          <div id="acctLinkMsg" class="msg"></div>
+        </section>
+
+        <section class="panel acct-card acct-session">
+          <span id="acctEmail" class="msg"></span>
+        </section>
+      </div>
+    </main>
+
+    <main class="login-page" id="login" hidden>
+      <div class="login-card panel">
+        <img class="login-logo" src="logo.svg" alt="">
+        <h2>Sign in to SparkRitual</h2>
+        <p class="msg">Save your decks online, share them, and open them on any device. Decks already in this browser stay available.</p>
+        <div class="login-options">
+          <button data-provider="google"><svg aria-hidden="true"><use href="#ico-google"/></svg>Continue with Google</button>
+          <button data-provider="discord"><svg aria-hidden="true"><use href="#ico-discord"/></svg>Continue with Discord</button>
+        </div>
+        <div id="loginMsg" class="msg"></div>
       </div>
     </main>
 
@@ -156,11 +223,11 @@
       <div id="shareBox" class="field" hidden>
         Visibility
         <select id="setVis">
-          <option value="private">Private: only you</option>
-          <option value="unlisted">Unlisted: anyone with the link</option>
-          <option value="public">Public: anyone, can be listed</option>
+          <option value="public">Public</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="private">Private</option>
         </select>
-        <div class="share-row"><input id="shareLink" type="text" readonly><button id="shareCopy">Copy link</button></div>
+        <div id="shareHidden" class="msg err" hidden>Your account is set to hide your decks, so nobody else can open this deck whatever you choose here. Change that in <a href="#account">Account Settings</a>.</div>
       </div>
       <div class="dialog-foot"><span></span><button id="settingsSave" class="apply">Save</button></div>
     </dialog>
@@ -199,6 +266,11 @@
           <button id="tabPartner" hidden>Partner / Background (optional)</button>
         </div>
         <div class="foot-actions">
+          <select id="newVis" aria-label="Deck visibility" title="Who can see this deck">
+            <option value="public">Public</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="private">Private</option>
+          </select>
           <button id="newImport">Import cards</button>
           <button id="newCreate" disabled>Create Deck</button>
         </div>
@@ -229,13 +301,17 @@
         </div>
         <button id="newBtn" class="side-nav-item">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>New Deck</button>
-        <button id="authBtn" class="side-nav-item" hidden>
-          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.2"/><path d="M3.5 17c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/></svg><span id="authLabel">Log in</span></button>
+        <button id="accountBtn" class="side-nav-item" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.2"/><path d="M3.5 17c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/></svg>Account Settings</button>
         <div class="side-nav-spacer"></div>
         <button class="side-nav-item" data-dialog="aboutDialog">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.2" r=".6" fill="currentColor"/></svg>About</button>
         <button class="side-nav-item" data-dialog="appSettingsDialog">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
+        <button id="loginBtn" class="side-nav-item" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>Log in</button>
+        <button id="logoutBtn" class="side-nav-item" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Sign out</button>
       </nav>
     </dialog>
 
@@ -260,29 +336,9 @@
       <label class="setting-row"><input id="darkModeToggle" type="checkbox" checked> Dark mode</label>
     </dialog>
 
-    <dialog id="authDialog">
-      <div class="dialog-head">
-        <h2 id="authTitle">Sign in</h2>
-        <button data-close>Close</button>
-      </div>
-      <div id="authOut">
-        <div class="msg">Sign in to save decks online and share them. Decks in this browser stay available.</div>
-        <label class="field">Email<input id="authEmail" type="email" placeholder="you@example.com" autocomplete="email"></label>
-        <div class="dialog-foot"><span></span><button id="authSend" class="apply">Email me a sign-in link</button></div>
-        <div class="auth-alt">
-          <button data-provider="google"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"/></svg>Continue with Google</button>
-          <button data-provider="discord"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#5865F2" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>Continue with Discord</button>
-        </div>
-      </div>
-      <div id="authIn" hidden>
-        <label class="field">Display name (shown on shared decks)<input id="authName" type="text" maxlength="32"></label>
-        <div class="dialog-foot"><button id="authOutBtn">Sign out</button><button id="authSave" class="apply">Save name</button></div>
-      </div>
-      <div id="authMsg" class="msg"></div>
-    </dialog>
 
-    <script src="config.js?v=20261111"></script>
-    <script src="cloud.js?v=20261111"></script>
-    <script src="app.js?v=20261111"></script>
+    <script src="config.js?v=20261111k"></script>
+    <script src="cloud.js?v=20261111k"></script>
+    <script src="app.js?v=20261111k"></script>
   </body>
 </html>

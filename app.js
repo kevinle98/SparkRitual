@@ -3,7 +3,12 @@
 const API = 'https://api.scryfall.com';
 const DECKS_KEY = 'sparkritual.decks.v2';
 const LEGACY_KEY = 'sparkritual.deck.v1';
-const APP_URL = location.href.split(/[?#]/)[0];
+// Addresses: decks/personal, decks/<id>, users/<name>, account. Served over http they are real paths
+// (.htaccess hands them to index.html); opened as a local file they live after a "#/" instead.
+const PATH_MODE = location.protocol !== 'file:';
+const APP_URL = PATH_MODE ? new URL('.', document.baseURI).href : location.href.split(/[?#]/)[0];
+const BASE_PATH = new URL(APP_URL).pathname; // "/" or "/subfolder/"
+const hrefFor = path => PATH_MODE ? APP_URL + path : `${APP_URL}#/${path}`;
 const APP_TITLE = document.title;
 
 // localStorage can be missing (private mode) or full; every read and write goes through here.
@@ -46,9 +51,59 @@ const bodyIs = cls => document.body.classList.contains(cls);
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ESC_MAP[c]);
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
+// Loading indicator: the logo's three circles revolving around their centre (styling in .spinner).
+const spinnerHtml = (label = 'Loading...') => `<div class="spinner" role="status"><svg viewBox="-232 -232 464 464" aria-hidden="true"><circle cx="0" cy="-136" r="94"/><circle cx="-117.8" cy="68" r="94" opacity=".7"/><circle cx="117.8" cy="68" r="94" opacity=".4"/></svg><span>${esc(label)}</span></div>`;
+
+// Full-page loading screen (#loading, in the HTML from the first paint). It covers everything until the
+// landing page is ready: the sign-in library loaded, the first sync done, and the selected cover drawn.
+const LOADING_LINES = ['Floating 3 mana...', 'Holding priority...', 'Untapping lands...', 'In response...'];
+let loadingTok = 0, bootDone = false;
+function showLoading() {
+  const el = $('loading');
+  loadingTok++;
+  el.querySelector('.loading-text').textContent = LOADING_LINES[Math.floor(Math.random() * LOADING_LINES.length)];
+  el.classList.remove('out');
+  el.hidden = false;
+}
+function hideLoading() {
+  const el = $('loading');
+  if (el.hidden) return;
+  const tok = ++loadingTok;
+  el.classList.add('out'); // fade, then drop out of the layout
+  setTimeout(() => { if (tok === loadingTok) { el.hidden = true; el.classList.remove('out'); } }, 300);
+}
+// Resolves once the selected carousel cover has loaded (or soon enough if it won't).
+const coverReady = () => new Promise(res => {
+  const img = $('carousel').querySelector('.slide.sel img.cover');
+  if (!img || img.complete) return res();
+  img.addEventListener('load', res, { once: true });
+  img.addEventListener('error', res, { once: true });
+  setTimeout(res, 3000);
+});
+function finishBoot() {
+  if (bootDone) return;
+  bootDone = true;
+  if (!viewing) coverReady().then(hideLoading); // a public profile hides it itself when its decks arrive
+}
+setTimeout(finishBoot, 8000); // never leave the screen up if the sign-in library stalls
 // Memoize a pure function of an object (card or deck) for that object's lifetime.
 const memo = fn => { const m = new WeakMap(); return o => { let v = m.get(o); if (v === undefined) m.set(o, v = fn(o)); return v; }; };
-const isUnlimited = memo(c => BASICS.has(c.name) || /any number of cards named/i.test(c.oracle_text));
+// How many copies a deck may hold. Basics and "any number of cards named" (Hare Apparent, Relentless
+// Rats...) are unlimited; "up to seven/nine cards named" (Seven Dwarves, Nazgûl) are capped; the rest are singletons.
+const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20 };
+const maxCopies = memo(c => {
+  if (BASICS.has(c.name) || /any number of cards named/i.test(c.oracle_text)) return Infinity;
+  const m = /up to (\w+) cards named/i.exec(c.oracle_text);
+  return m ? (NUM_WORDS[m[1].toLowerCase()] || parseInt(m[1], 10) || 1) : 1;
+});
+// Copies of each name in the current deck, commanders included and across printings.
+const ownedCounts = () => {
+  const m = new Map();
+  state.commanders.forEach(c => m.set(c.name, (m.get(c.name) || 0) + 1));
+  Object.values(state.cards).forEach(({ card, qty }) => m.set(card.name, (m.get(card.name) || 0) + qty));
+  return m;
+};
+const canAdd = (c, counts = ownedCounts()) => (counts.get(c.name) || 0) < maxCopies(c);
 const nameClause = t => t ? ` name:${/\s/.test(t) ? JSON.stringify(t) : t}` : '';
 
 // Status line: an element with class "msg" (or "sync") whose "err" class marks errors.
@@ -105,12 +160,18 @@ async function scry(url) {
 async function collection(identifiers) {
   const out = [];
   for (let i = 0; i < identifiers.length; i += 75) {
-    const res = await fetch(`${API}/cards/collection`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifiers: identifiers.slice(i, i + 75) }),
-    });
-    if (!res.ok) throw new Error('Scryfall request failed');
+    let res;
+    try {
+      res = await fetch(`${API}/cards/collection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifiers: identifiers.slice(i, i + 75) }),
+      });
+    } catch {
+      // Browsers hide the real cause (offline, or a Scryfall outage reply without CORS headers).
+      throw new Error("Couldn't reach Scryfall, the card database. Please try again in a few minutes.");
+    }
+    if (!res.ok) throw new Error(`Scryfall couldn't load the cards right now (error ${res.status}). Please try again in a few minutes.`);
     out.push(...intern((await res.json()).data));
   }
   return out;
@@ -260,14 +321,14 @@ function refreshDeck(research) {
 function addCard(card) {
   if (!state.commanders.length || !inIdentity(card)) return;
   const e = Object.values(state.cards).find(x => x.card.name === card.name);
-  if (e) { if (isUnlimited(card)) e.qty++; }
+  if (e) { if (canAdd(card)) e.qty++; }
   else state.cards[card.id] = { card, qty: 1 };
   refreshDeck();
 }
 
 function changeQty(id, d) {
   const e = state.cards[id];
-  if (!e) return;
+  if (!e || (d > 0 && !canAdd(e.card))) return;
   e.qty += d;
   if (e.qty <= 0) delete state.cards[id];
   refreshDeck();
@@ -311,13 +372,19 @@ function loadDecks() {
 }
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const gotoDeck = id => { location.hash = `deck=${id}`; };
+// Navigate within the app. replace: swap the current history entry instead of adding one.
+function go(path, replace = false) {
+  history[replace ? 'replaceState' : 'pushState'](null, '', hrefFor(path));
+  route();
+}
+const gotoDeck = id => go(`decks/${encodeURIComponent(id)}`);
+// A deck has one address: the editor when it's in this browser, read-only otherwise.
 const openDeckPage = d => { if (d) gotoDeck(d.id); };
 
-function createDeck(name, commanders, cards = {}) {
+function createDeck(name, commanders, cards = {}, visibility = 'private') {
   const id = newId();
   const owner = Cloud.user?.id;
-  decks[id] = { id, name, commanders, cards, sort: 'type', visibility: 'private', owner, updated: Date.now() };
+  decks[id] = { id, name, commanders, cards, sort: 'type', visibility, owner, updated: Date.now() };
   saveDecks();
   if (owner) queueCloud(id);
   gotoDeck(id);
@@ -346,28 +413,63 @@ function openDeck(id) {
 function showHome() {
   persist();
   state.id = null;
+  if (!bootDone) showLoading(); // first visit: keep the loading screen up until finishBoot()
   document.body.classList.add('home');
   homeSel = 0;
   homeList = []; // start on the most recent deck rather than restoring the old selection
   renderHome();
 }
 
+// The route in the address bar: "decks/abc", "users/kevin", "account", or "" at the root.
+function currentPath() {
+  if (!PATH_MODE) return location.hash.startsWith('#/') ? location.hash.slice(2) : '';
+  const p = location.pathname.startsWith(BASE_PATH) ? location.pathname.slice(BASE_PATH.length) : '';
+  return p === 'index.html' ? '' : p;
+}
+
+// Addresses from before path routing (?d=<id>, ?u=<name>, #deck=<id>, #account) still work.
+function legacyPath() {
+  const q = new URLSearchParams(location.search), h = location.hash;
+  if (h.startsWith('#deck=')) return `decks/${encodeURIComponent(h.slice(6))}`;
+  if (h === '#account') return 'account';
+  if (q.get('d')) return `decks/${encodeURIComponent(q.get('d'))}`;
+  if (q.get('u')) return `users/${encodeURIComponent(q.get('u'))}`;
+  return null;
+}
+
 function route() {
-  const m = location.hash.match(/^#deck=(.+)$/);
-  const shared = new URLSearchParams(location.search).get('d');
-  if (shared && !m) return openShared(shared);
-  if (bodyIs('shared')) { // leaving a shared page
-    document.body.classList.remove('shared');
-    sharedInfo = null;
-    document.title = APP_TITLE;
-    history.replaceState(null, '', APP_URL + location.hash);
+  const legacy = legacyPath();
+  if (legacy !== null) return go(legacy, true);
+  const path = currentPath();
+  let m;
+  // Only the landing page and public profiles use the loading screen; every other page shows at once.
+  if (path && path !== 'decks/personal' && !path.startsWith('users/')) hideLoading();
+  if ((m = path.match(/^users\/([^/]+)$/))) return openProfile(decodeURIComponent(m[1]));
+  if ((m = path.match(/^decks\/([^/]+)$/)) && m[1] !== 'personal') {
+    const id = decodeURIComponent(m[1]);
+    if (!decks[id]) return openShared(id); // not in this browser: someone else's, or yours before it has synced
+    leaveViewer();
+    profileCache.clear();
+    return openDeck(id);
   }
-  if (m && decks[m[1]]) openDeck(m[1]); else showHome();
+  leaveViewer();
+  profileCache.clear();
+  if (path === 'account') return showAccount();
+  if (path === 'login') return showLogin();
+  // A bare root becomes decks/personal at once. A root carrying a query or hash is left alone for now:
+  // sign-in returns land there with ?code=, which the Supabase library must read first (Cloud.ready tidies it).
+  if (path !== 'decks/personal' && (path || (!location.search && location.hash.length < 2))) return go('decks/personal', true);
+  showHome();
 }
 
 /* ---------- Landing page: carousel ---------- */
 
 let homeList = [], homeSel = 0, homeRadius = 0;
+// Public profile being shown on the landing page (?u=<name>), or null for your own decks.
+// { name, owner?, ownerId?, decks: [deck] | null while loading, error? }
+let viewing = null;
+const profileEmptyText = () => viewing.error || (viewing.decks ? `${viewing.owner} hasn't shared any decks yet.` : 'Loading decks...');
+const profileLoading = () => !!viewing && !viewing.decks && !viewing.error;
 // homeTarget is where navigation is heading; homeSel walks toward it one slot at a time.
 let homeTarget = 0, stepTimer = 0;
 const homeSlides = new Map();
@@ -459,7 +561,7 @@ const infoHtml = (title, rows) => `<div class="info-text"><div class="title-row"
 function renderHome() {
   // Keep the same deck selected even if a sync or edit re-sorted the list.
   const keepId = homeList[homeSel]?.id;
-  homeList = sortDecks(Object.values(decks));
+  homeList = sortDecks(viewing ? [...(viewing.decks || [])] : Object.values(decks));
   const kept = keepId ? homeList.findIndex(d => d.id === keepId) : -1;
   homeSel = Math.max(0, Math.min(kept >= 0 ? kept : homeSel, homeList.length - 1));
   stopStepping();
@@ -481,11 +583,15 @@ function renderHome() {
           <div class="cover blank"></div><div class="refl"><div class="blank"></div></div></div>`);
       }
     }
-    carousel.innerHTML = ghosts.join('') + `<div class="slide sel placeholder" role="button" tabindex="0" aria-label="Create a new deck" title="Create a new deck" style="z-index: 100; transform: ${slideTransform(0)}">
-      <div class="cover blank">${PLUS_ICON}</div>
+    carousel.innerHTML = ghosts.join('') + (viewing
+      ? `<div class="slide sel" aria-hidden="true" style="z-index: 100; transform: ${slideTransform(0)}">`
+      : `<div class="slide sel placeholder" role="button" tabindex="0" aria-label="Create a new deck" title="Create a new deck" style="z-index: 100; transform: ${slideTransform(0)}">`)
+      + `<div class="cover blank">${viewing ? '' : PLUS_ICON}</div>
       <div class="refl"><div class="blank"></div></div></div>`;
     $('prevBtn').disabled = $('nextBtn').disabled = true;
-    $('deckInfo').innerHTML = infoHtml('<div class="title muted">No decks created.</div>', [['Commander', '--'], ['Bracket', '--'], ['Color Identity', '--']]);
+    $('deckInfo').innerHTML = viewing
+      ? (profileLoading() ? spinnerHtml('Loading decks...') : infoHtml(`<div class="title muted">${esc(profileEmptyText())}</div>`, []))
+      : infoHtml('<div class="title muted">No decks created.</div>', [['Commander', '--'], ['Bracket', '--'], ['Color Identity', '--']]);
     return;
   }
   const selected = createHomeSlide(homeSel);
@@ -613,7 +719,7 @@ function renderInfo() {
   $('deckInfo').innerHTML = infoHtml(`<div class="title">${esc(d.name)}</div>${optsBtn(d)}`, rows);
 }
 
-const optsBtn = d => `<button class="opts-btn" data-deck-menu="${esc(d.id)}" aria-label="Options for ${esc(d.name)}" aria-haspopup="menu" aria-expanded="false">&#8943;</button>`;
+const optsBtn = d => viewing ? '' : `<button class="opts-btn" data-deck-menu="${esc(d.id)}" aria-label="Options for ${esc(d.name)}" aria-haspopup="menu" aria-expanded="false">&#8943;</button>`;
 const activateSlide = () => openDeckPage(homeList[homeSel]);
 
 function deleteDeck(d) {
@@ -717,6 +823,7 @@ function renderGallery() {
         <div class="tile-row"><div class="tile-text"><div class="tile-name">${esc(d.name)}</div><div class="tile-sub">${esc(commanderName(d))}</div></div>${optsBtn(d)}</div>
       </div>`;
     }).join('')
+    : viewing ? (profileLoading() ? spinnerHtml('Loading decks...') : `<div class="msg">${esc(profileEmptyText())}</div>`)
     : `<div class="tile"><button class="tile-art placeholder" data-new aria-label="Create a new deck" title="Create a new deck">${PLUS_ICON}</button></div>`;
 }
 
@@ -743,7 +850,7 @@ function renderList() {
         <td class="c-recent">${fmtDate(d.updated)}</td>
         <td class="c-opts">${optsBtn(d)}</td>
       </tr>`).join('')
-    : `<tr><td colspan="${LIST_COLS.length + 1}" class="list-empty">No decks yet. <button data-new>Create a New Deck</button> to get started.</td></tr>`;
+    : `<tr><td colspan="${LIST_COLS.length + 1}" class="list-empty">${viewing ? (profileLoading() ? spinnerHtml('Loading decks...') : esc(profileEmptyText())) : 'No decks yet. <button data-new>Create a New Deck</button> to get started.'}</td></tr>`;
   $('deckTable').innerHTML = `<thead><tr>${head}<th class="c-opts"><span class="sr-only">Options</span></th></tr></thead><tbody>${body}</tbody>`;
   listDeck = null; // force a redraw (null never matches a deck or the empty-list undefined)
   showHomePreview(homeList[homeSel]);
@@ -757,7 +864,7 @@ function showHomePreview(d) {
   listDeck = d;
   const c = d?.commanders?.[0];
   if (c) listPreview.show(c);
-  else listPreview.clear(homeList.length ? 'Hover over a deck to preview its commander.' : 'Your decks will appear here.');
+  else listPreview.clear(homeList.length ? 'Hover over a deck to preview its commander.' : viewing ? profileEmptyText() : 'Your decks will appear here.');
 }
 
 function selectListRow(i) {
@@ -857,9 +964,11 @@ document.addEventListener('keydown', e => {
   if (step) { e.preventDefault(); select(homeTarget + step); }
   else if (e.key === 'Home') { e.preventDefault(); select(0); }
   else if (e.key === 'End') { e.preventDefault(); select(homeList.length - 1); }
-  else if (e.key === 'Enter' && !e.target.closest('button')) homeList.length ? activateSlide() : openNewDeck();
+  else if (e.key === 'Enter' && !e.target.closest('button')) {
+    if (homeList.length) activateSlide(); else if (!viewing) openNewDeck();
+  }
 });
-window.addEventListener('hashchange', route);
+window.addEventListener('popstate', route); // Back / Forward (also fires for hand-edited hashes)
 
 // Decks saved before a field existed are re-fetched to fill it in.
 async function refreshStale() {
@@ -1038,7 +1147,7 @@ let viewStack = store.get('sparkritual.stack') === '1';
 
 // Shared by rows and tiles: legality + selection classes, and the hover action buttons.
 const itemClass = card => `${inIdentity(card) ? '' : ' illegal'}${selectedCard?.id === card.id ? ' sel' : ''}`;
-const itemActs = card => `<span class="acts">${isUnlimited(card) ? '<button data-qty="1" title="Add one">+</button>' : ''}<button data-menu title="Options" aria-haspopup="menu" aria-expanded="false">&#8943;</button></span>`;
+const itemActs = card => `<span class="acts">${maxCopies(card) > 1 && canAdd(card) ? '<button data-qty="1" title="Add one">+</button>' : ''}<button data-menu title="Options" aria-haspopup="menu" aria-expanded="false">&#8943;</button></span>`;
 
 function deckTile({ card, qty }) {
   return `<div class="tile${itemClass(card)}" data-id="${card.id}">
@@ -1180,11 +1289,8 @@ function resultRow(c) {
     <span class="cost">${symbols(c.mana_cost)}</span></div>`;
 }
 
-const ownedNames = () => new Set(allCards(state.commanders, state.cards).map(c => c.name));
-const canAdd = (c, owned = ownedNames()) => isUnlimited(c) || !owned.has(c.name);
-
 function renderResultStates() {
-  const owned = ownedNames();
+  const owned = ownedCounts();
   let top = null;
   for (const row of $('searchResults').children) {
     const addable = canAdd(cache.get(row.dataset.id), owned);
@@ -1375,7 +1481,7 @@ $('searchInput').addEventListener('keydown', async e => {
   e.preventDefault();
   onSearchInput.cancel();
   if ($('searchInput').value.trim() !== search.text) await runSearch();
-  const owned = ownedNames();
+  const owned = ownedCounts();
   const hit = search.list.find(c => canAdd(c, owned));
   if (hit) pickResult(hit);
 });
@@ -1469,7 +1575,7 @@ $('settingsBtn').addEventListener('click', () => {
   $('setDesc').value = state.description;
   $('shareBox').hidden = !(Cloud.enabled && Cloud.user);
   $('setVis').value = state.visibility;
-  $('shareLink').value = `${APP_URL}?d=${state.id}`;
+  $('shareHidden').hidden = Cloud.profile?.decks_visible !== false;
   $('settingsDialog').showModal();
 });
 $('settingsSave').addEventListener('click', () => {
@@ -1477,11 +1583,17 @@ $('settingsSave').addEventListener('click', () => {
   state.description = $('setDesc').value.trim();
   state.visibility = $('setVis').value;
   persist();
-  flushDeck(state.id); // so a freshly copied share link works immediately
+  flushDeck(state.id); // so a visibility change reaches the server right away
   showDeckTitle();
   $('settingsDialog').close();
 });
-bindCopy('shareCopy', 'shareLink', 'Copy link');
+$('shareHidden').querySelector('a').href = hrefFor('account');
+$('shareHidden').addEventListener('click', e => {
+  if (!e.target.closest('a')) return;
+  e.preventDefault();
+  $('settingsDialog').close();
+  go('account');
+});
 
 /* ---------- Import / export ---------- */
 
@@ -1523,14 +1635,16 @@ async function fetchByNames(names) {
   return byKey;
 }
 
-// entries: [{ card, qty }] where card may be undefined (not found). Enforces singleton except for unlimited cards.
+// entries: [{ card, qty }] where card may be undefined (not found). Quantities are clamped to each
+// card's copy limit; a line with no room left counts as a duplicate.
 function buildCards(entries, cmdIds) {
   const cards = {};
   let dupes = 0;
   for (const { card: c, qty } of entries) {
     if (!c || cmdIds.has(c.id)) continue;
-    if (cards[c.id] && !isUnlimited(c)) { dupes++; continue; }
-    const add = isUnlimited(c) ? qty : 1;
+    const have = cards[c.id]?.qty || 0, room = maxCopies(c) - have;
+    if (room <= 0) { dupes++; continue; }
+    const add = Math.min(qty, room);
     if (cards[c.id]) cards[c.id].qty += add; else cards[c.id] = { card: c, qty: add };
   }
   return { cards, dupes };
@@ -1565,7 +1679,7 @@ function applyList() {
     refreshDeck(true);
     const notes = [];
     if (missing.length) notes.push(`Not found: ${missing.join(', ')}`);
-    if (dupes) notes.push(`${dupes} duplicate(s) skipped (singleton)`);
+    if (dupes) notes.push(`${dupes} duplicate(s) skipped (copy limit)`);
     if (notes.length) { setMsg('listMsg', `Imported. ${notes.join('. ')}.`); $('listText').value = exportText(); }
     else listDlg.close();
   });
@@ -1613,6 +1727,8 @@ function openNewDeck() {
   Object.assign(draft, { card: null, partner: null, target: 'cmd', importText: '', imported: [] });
   $('newName').value = '';
   $('newSearch').value = '';
+  $('newVis').value = 'public';
+  $('newVis').hidden = !(Cloud.enabled && Cloud.user); // visibility only means something for online decks
   updateDraftUi();
   draftPreview.clear('Hover over a commander to preview it.');
   newDlg.showModal();
@@ -1674,7 +1790,7 @@ $('newCreate').addEventListener('click', () => {
   const commanders = draft.partner ? [draft.card, draft.partner] : [draft.card];
   newDlg.close();
   const { cards } = buildCards(draft.imported, new Set(commanders.map(c => c.id)));
-  createDeck($('newName').value.trim() || 'Untitled Deck', commanders, cards);
+  createDeck($('newName').value.trim() || 'Untitled Deck', commanders, cards, $('newVis').hidden ? 'private' : $('newVis').value);
 });
 
 const importDlg = $('newImportDialog');
@@ -1720,14 +1836,16 @@ function setSearchEnabled() {
 
 const cloudTimers = new Map(); // deck id -> pending push timer
 const lastPushed = new Map();  // deck id -> signature of the last row we know the server has
-let sharedInfo = null, sharedTok = 0;
+let sharedInfo = null, sharedTok = 0, sharedId = null;
 
 const rowSig = row => JSON.stringify({ ...row, updated_at: 0 });
 const setSync = (text, bad) => setMsg('syncState', text, bad);
 
+// Hamburger menu: Account Settings near the top, and Log in / Sign out swapping at the bottom.
 function updateAuthUi() {
-  $('authBtn').hidden = !Cloud.enabled;
-  $('authLabel').textContent = Cloud.user ? (Cloud.profile?.display_name || 'Account') : 'Log in';
+  $('accountBtn').hidden = !(Cloud.enabled && Cloud.user);
+  $('loginBtn').hidden = !Cloud.enabled || !!Cloud.user;
+  $('logoutBtn').hidden = !Cloud.user;
   updateCopyBtn();
 }
 
@@ -1805,6 +1923,7 @@ async function syncDown(askUpload) {
     }
     writeDecks();
     if (bodyIs('home')) renderHome();
+    if (bodyIs('shared') && sharedId && decks[sharedId]) route(); // your own deck, opened before it synced: switch to the editor
     setSync('Synced');
   } catch (e) { setSync('Sync failed: ' + e.message, true); }
 }
@@ -1819,22 +1938,84 @@ function signedOutCleanup() {
   if (mine.length) writeDecks();
   setSync('');
   if (bodyIs('shared')) return;
+  if (bodyIs('account')) { go('decks/personal', true); return; } // the account page is signed-in only
   if (state.id && !decks[state.id]) {
     state.id = null;
-    if (location.hash) location.hash = ''; else route();
+    go('decks/personal', true);
   } else if (bodyIs('home')) renderHome();
 }
 
-/* Shared (read-only) deck page: ?d=<deck id> */
+/* Read-only views of other people's decks: a shared deck (?d=<id>) and a public profile (?u=<name>) */
+
+// Resets whatever a shared-deck or profile view changed. Bumping the tokens drops their pending loads.
+function leaveViewer() {
+  document.body.classList.remove('shared', 'profile');
+  setPage('account', false);
+  setPage('login', false);
+  sharedInfo = null;
+  sharedId = null;
+  viewing = null;
+  sharedTok++;
+  profileTok++;
+  document.title = APP_TITLE;
+}
+
+// Public profile: the landing page, read-only, listing the account's Unlisted and Public decks.
+let profileTok = 0;
+const profileCache = new Map(); // lower-case name -> loaded profile, so Back from one of its decks is instant
+
+function showProfileTitle() {
+  const text = viewing.error ? 'Player not found' : `${viewing.owner || viewing.name}'s decks`;
+  $('profileTitle').textContent = text;
+  document.title = `${text} - SparkRitual`;
+}
+
+async function openProfile(name) {
+  persist();
+  leaveViewer();
+  const tok = ++profileTok, key = name.toLowerCase();
+  state.id = null;
+  document.body.classList.add('home', 'profile');
+  viewing = profileCache.get(key) || { name, decks: null };
+  if (!viewing.decks) showLoading();
+  showProfileTitle();
+  homeSel = 0;
+  homeList = [];
+  renderHome();
+  if (viewing.decks) return hideLoading();
+  try {
+    await Cloud.ready;
+    if (!Cloud.enabled) throw new Error('Online decks are not set up on this site.');
+    const p = await Cloud.getProfile(name);
+    if (!p) throw new Error(`There's no public page for "${name}". The name may be wrong, or this player keeps their decks hidden.`);
+    // One batched card lookup for every deck, then each deck builds from the cache.
+    const ids = [...new Set(p.decks.flatMap(r => [...r.commanders, ...Object.keys(r.cards)]))].filter(id => !cache.has(id));
+    await collection(ids.map(id => ({ id })));
+    const list = (await Promise.all(p.decks.map(r => hydrate(r).catch(() => null)))).filter(Boolean);
+    if (tok !== profileTok) return;
+    viewing = { name, owner: p.owner, ownerId: p.owner_id, decks: list };
+    profileCache.set(key, viewing);
+  } catch (e) {
+    if (tok !== profileTok) return;
+    viewing = { name, decks: null, error: e.message };
+  }
+  showProfileTitle();
+  renderHome();
+  coverReady().then(hideLoading);
+}
 
 async function openShared(id) {
+  persist();
+  leaveViewer();
+  sharedId = id;
   const tok = ++sharedTok;
   document.body.classList.remove('home');
   document.body.classList.add('shared');
   state.id = null; // nothing from this view is ever saved locally
   $('deckTitle').textContent = 'Loading deck...';
   $('sharedDesc').textContent = '';
-  $('deckList').innerHTML = $('commanderSlots').innerHTML = $('deckStatus').innerHTML = '';
+  $('deckList').innerHTML = spinnerHtml('Loading deck...');
+  $('commanderSlots').innerHTML = $('deckStatus').innerHTML = '';
   try {
     await Cloud.ready;
     if (!Cloud.enabled) throw new Error('Online decks are not set up on this site.');
@@ -1871,11 +2052,12 @@ $('copyBtn').addEventListener('click', () => {
   gotoDeck(id);
 });
 
-document.querySelector('.topbar h1 a').addEventListener('click', e => {
-  if (!bodyIs('shared')) return;
+// The logo is "your decks". Clicking it while already there just re-renders rather than piling up history.
+const homeLink = document.querySelector('.topbar h1 a');
+homeLink.href = hrefFor('decks/personal');
+homeLink.addEventListener('click', e => {
   e.preventDefault();
-  history.replaceState(null, '', APP_URL);
-  route();
+  go('decks/personal', currentPath() === 'decks/personal');
 });
 
 /* Hamburger menu */
@@ -1903,60 +2085,239 @@ $('darkModeToggle').addEventListener('change', e => {
   store.set('sparkritual.theme', dark ? null : 'light');
 });
 
-/* Account dialog */
+/* Login page (/login): Google or Discord */
 
-const authDlg = $('authDialog');
-const authMsg = (t, bad) => setMsg('authMsg', t, bad);
+const loginMsg = (t, bad) => setMsg('loginMsg', t, bad);
+let loginNotice = null; // [text, bad] to show when the page next opens
 
-$('authBtn').addEventListener('click', () => {
-  const on = !!Cloud.user;
-  $('authTitle').textContent = on ? 'Account' : 'Sign in';
-  $('authOut').hidden = on;
-  $('authIn').hidden = !on;
-  $('authName').value = Cloud.profile?.display_name || '';
-  authMsg('');
-  authDlg.showModal();
+// A page's hidden attribute keeps it out of view even if a stale stylesheet is cached.
+function setPage(id, on) {
+  document.body.classList.toggle(id, on);
+  $(id).hidden = !on;
+}
+
+// Sends a signed-out visitor to the login page with a note saying why.
+function requireLogin(msg, bad) {
+  loginNotice = msg ? [msg, bad] : null;
+  go('login', true);
+}
+
+async function showLogin() {
+  persist();
+  state.id = null;
+  document.body.classList.remove('home');
+  setPage('login', true);
+  loginMsg(...(loginNotice || ['']));
+  loginNotice = null;
+  setOAuthBusy(false);
+  await Cloud.ready;
+  if (!bodyIs('login')) return; // navigated away while loading
+  if (Cloud.user || !Cloud.enabled) go('decks/personal', true); // already signed in, or nothing to sign in to
+}
+
+$('accountBtn').addEventListener('click', () => go('account'));
+$('loginBtn').addEventListener('click', () => go('login'));
+$('logoutBtn').addEventListener('click', async () => {
+  for (const id of [...cloudTimers.keys()]) { clearTimeout(cloudTimers.get(id)); await pushNow(id); } // don't lose pending edits
+  try { await Cloud.signOut(); } catch (e) { alert(`Sign-out failed: ${e.message}`); }
 });
-$('authSend').addEventListener('click', async () => {
-  const email = $('authEmail').value.trim();
-  if (!email) return authMsg('Enter your email address.', true);
-  $('authSend').disabled = true;
-  authMsg('Sending...');
-  try { await Cloud.signInEmail(email); authMsg('Check your email for a sign-in link, and open it in this browser.'); }
-  catch (e) { authMsg(e.message, true); }
-  finally { $('authSend').disabled = false; }
-});
-const oauthBtns = authDlg.querySelectorAll('[data-provider]');
+
+const oauthBtns = $('login').querySelectorAll('[data-provider]');
 const setOAuthBusy = on => oauthBtns.forEach(x => { x.disabled = on; });
 oauthBtns.forEach(b => b.addEventListener('click', async () => {
   setOAuthBusy(true);
-  authMsg('Redirecting...');
+  loginMsg('Redirecting...');
   // On success the browser leaves the page, so only the failure path needs to reset.
   try { await Cloud.signInOAuth(b.dataset.provider); }
-  catch (e) { setOAuthBusy(false); authMsg(e.message, true); }
+  catch (e) { setOAuthBusy(false); loginMsg(e.message, true); }
 }));
-// Coming back with the Back button can restore the page from cache with the buttons still disabled.
-window.addEventListener('pageshow', e => { if (e.persisted) { setOAuthBusy(false); authMsg(''); } });
-$('authSave').addEventListener('click', async () => {
-  try { await Cloud.setDisplayName($('authName').value.trim()); updateAuthUi(); authMsg('Saved.'); }
-  catch (e) { authMsg(e.message, true); }
+
+/* Account settings page (#account, signed in only) */
+
+const PROVIDERS = { google: 'Google', discord: 'Discord' };
+const LINKING_KEY = 'sparkritual-linking'; // provider being linked, so we can confirm after the redirect
+const NAME_HINT = 'Shown on decks you share.';
+const acctMsg = (t, bad) => setMsg('acctMsg', t, bad);
+const linkMsg = (t, bad) => setMsg('acctLinkMsg', t, bad);
+let acctSaved = null;  // profile values as stored on the server
+let acctNotice = null; // [text, bad] for the sign-in methods section, shown on the next visit
+let nameOk = true, nameTimer = 0, nameTok = 0, linkTok = 0;
+
+async function showAccount() {
+  persist();
+  state.id = null;
+  document.body.classList.remove('home');
+  setPage('account', true);
+  await Cloud.ready;
+  if (!bodyIs('account')) return; // navigated away while loading
+  if (!Cloud.user) {
+    if (Cloud.enabled) requireLogin('Sign in to see your account settings.'); else go('decks/personal', true);
+    return;
+  }
+  loadAccountForm();
+  linkMsg(...(acctNotice || ['']));
+  acctNotice = null;
+  renderLinks();
+}
+
+// Staged form: nothing is saved until "Save changes".
+const acctForm = () => ({
+  display_name: $('acctName').value.trim(),
+  decks_visible: document.querySelector('input[name="acctVis"]:checked')?.value !== '0',
 });
-$('authOutBtn').addEventListener('click', async () => {
-  for (const id of [...cloudTimers.keys()]) { clearTimeout(cloudTimers.get(id)); await pushNow(id); } // don't lose pending edits
-  try { await Cloud.signOut(); authDlg.close(); } catch (e) { authMsg(e.message, true); }
+function acctChanges() {
+  const form = acctForm(), changes = {};
+  for (const k in form) if (form[k] !== acctSaved[k]) changes[k] = form[k];
+  return changes;
+}
+function updateAcctActions() {
+  const dirty = Object.keys(acctChanges()).length > 0;
+  $('acctSave').disabled = !dirty || !nameOk;
+  $('acctDiscard').disabled = !dirty;
+}
+function setNameMsg(text, state) { // state: undefined | 'ok' | 'bad'
+  setMsg('acctNameMsg', text, state === 'bad');
+  $('acctNameMsg').classList.toggle('ok', state === 'ok');
+}
+function loadAccountForm() {
+  acctSaved = { display_name: Cloud.profile?.display_name || '', decks_visible: Cloud.profile?.decks_visible !== false };
+  $('acctName').value = acctSaved.display_name;
+  document.querySelector(`input[name="acctVis"][value="${acctSaved.decks_visible ? 1 : 0}"]`).checked = true;
+  $('acctEmail').textContent = Cloud.user.email ? `Signed in as ${Cloud.user.email}` : '';
+  // The public page link reflects what's saved, not what's being edited.
+  const pub = acctSaved.decks_visible && !!acctSaved.display_name;
+  $('acctPublic').hidden = !pub;
+  $('acctPublicLink').value = pub ? hrefFor(`users/${encodeURIComponent(acctSaved.display_name)}`) : '';
+  clearTimeout(nameTimer);
+  nameTok++;
+  nameOk = true;
+  setNameMsg(NAME_HINT);
+  acctMsg('');
+  updateAcctActions();
+}
+
+// Live uniqueness check (ignores case). The database's unique index is the final word on save.
+$('acctName').addEventListener('input', () => {
+  clearTimeout(nameTimer);
+  const tok = ++nameTok, name = $('acctName').value.trim();
+  if (name === acctSaved.display_name) { nameOk = true; setNameMsg(NAME_HINT); }
+  else if (!Cloud.validName(name)) { nameOk = false; setNameMsg(Cloud.NAME_RULE, 'bad'); }
+  else {
+    nameOk = false;
+    setNameMsg('Checking availability...');
+    nameTimer = setTimeout(async () => {
+      let free;
+      try { free = await Cloud.nameAvailable(name); }
+      catch (e) { if (tok === nameTok) setNameMsg(`Couldn't check this name: ${e.message}`, 'bad'); return; }
+      if (tok !== nameTok) return;
+      nameOk = free;
+      setNameMsg(free ? `"${name}" is available.` : `"${name}" is already taken.`, free ? 'ok' : 'bad');
+      updateAcctActions();
+    }, 400);
+  }
+  updateAcctActions();
+});
+$('acctName').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('acctSave').disabled) $('acctSave').click(); });
+document.querySelectorAll('input[name="acctVis"]').forEach(r => r.addEventListener('change', updateAcctActions));
+
+$('acctSave').addEventListener('click', async () => {
+  const changes = acctChanges();
+  if (!Object.keys(changes).length || !nameOk) return;
+  $('acctSave').disabled = $('acctDiscard').disabled = true;
+  acctMsg('Saving...');
+  try {
+    await Cloud.updateProfile(changes);
+    loadAccountForm();
+    updateAuthUi();
+    acctMsg('Saved.');
+  } catch (e) {
+    acctMsg(e.message, true);
+    if ('display_name' in changes && /taken/.test(e.message)) { nameOk = false; setNameMsg(e.message, 'bad'); }
+    updateAcctActions();
+  }
+});
+$('acctDiscard').addEventListener('click', loadAccountForm);
+bindCopy('acctPublicCopy', 'acctPublicLink', 'Copy link');
+
+/* Linked sign-in methods (take effect immediately, not staged) */
+
+async function renderLinks() {
+  const box = $('authLinks'), tok = ++linkTok;
+  box.innerHTML = spinnerHtml();
+  let ids;
+  try { ids = await Cloud.identities(); }
+  catch (e) { if (tok === linkTok) box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+  if (tok !== linkTok) return;
+  box.innerHTML = Object.entries(PROVIDERS).map(([p, label]) => {
+    const id = ids.find(i => i.provider === p);
+    const detail = id ? (id.identity_data?.email || 'Linked') : 'Not linked';
+    const btn = !id ? `<button data-link="${p}">Link</button>`
+      : ids.length < 2 ? '<button disabled title="This is your only sign-in method">Unlink</button>'
+      : `<button data-unlink="${p}">Unlink</button>`;
+    return `<div class="link-row"><svg aria-hidden="true"><use href="#ico-${p}"/></svg>`
+      + `<span class="who">${label}<small>${esc(detail)}</small></span>${btn}</div>`;
+  }).join('');
+}
+
+$('authLinks').addEventListener('click', async e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const { link, unlink } = b.dataset;
+  if (link) {
+    if (Object.keys(acctChanges()).length && !confirm('Linking leaves this page. Your unsaved changes will be lost. Continue?')) return;
+    $('authLinks').querySelectorAll('button').forEach(x => { x.disabled = true; });
+    linkMsg('Redirecting...');
+    try { sessionStorage.setItem(LINKING_KEY, link); } catch { /* only used for the success message */ }
+    try { await Cloud.linkOAuth(link); }
+    catch (err) { linkMsg(err.message, true); renderLinks(); }
+  } else if (unlink) {
+    if (!confirm(`Unlink ${PROVIDERS[unlink]}? You won't be able to sign in with it until you link it again.`)) return;
+    b.disabled = true;
+    try {
+      const id = (await Cloud.identities()).find(i => i.provider === unlink);
+      if (id) await Cloud.unlink(id);
+      linkMsg(`${PROVIDERS[unlink]} unlinked.`);
+    } catch (err) { linkMsg(err.message, true); }
+    renderLinks();
+  }
+});
+
+// Coming back with the Back button can restore the page from cache with buttons still disabled.
+window.addEventListener('pageshow', e => {
+  if (!e.persisted) return;
+  setOAuthBusy(false);
+  loginMsg('');
+  try { sessionStorage.removeItem(LINKING_KEY); } catch { /* ignore */ }
+  if (bodyIs('account') && Cloud.user) { linkMsg(''); renderLinks(); }
 });
 
 Cloud.onAuth(async user => {
   updateAuthUi();
+  if (user && bodyIs('login')) go('decks/personal', true); // e.g. signed in from another tab
   if (user) await syncDown(true); else signedOutCleanup();
 });
-Cloud.ready.then(() => {
+Cloud.ready.then(async () => {
   updateAuthUi();
-  syncDown(false);
-  if (Cloud.enabled && Cloud.authError && !Cloud.user) {
-    $('authBtn').click();
-    authMsg(`Sign-in failed: ${Cloud.authError}`, true);
+  if (!currentPath()) go('decks/personal', true); // the sign-in library has read the address; drop its leftovers (?code=, a bare #)
+  await syncDown(false);
+  finishBoot();
+  let linking = null;
+  try { linking = sessionStorage.getItem(LINKING_KEY); sessionStorage.removeItem(LINKING_KEY); } catch { /* ignore */ }
+  if (!Cloud.enabled) return;
+  // Report how a redirect to Google/Discord turned out.
+  if (!Cloud.user) {
+    if (Cloud.authError) requireLogin(`Sign-in failed: ${Cloud.authError}`, true);
+    return;
   }
+  if (Cloud.authError) acctNotice = [`Linking failed: ${Cloud.authError}`, true];
+  else if (linking) {
+    // Confirm it really linked (the flag can be stale if the user abandoned the redirect).
+    const ids = await Cloud.identities().catch(() => []);
+    if (ids.some(i => i.provider === linking)) acctNotice = [`${PROVIDERS[linking] || linking} linked. You can now sign in with it.`];
+  }
+  if (!acctNotice) return;
+  if (bodyIs('account')) { linkMsg(...acctNotice); acctNotice = null; }
+  else go('account');
 });
 
 loadDecks();

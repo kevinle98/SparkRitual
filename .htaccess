@@ -1,0 +1,7 @@
+# SparkRitual is a single page. Addresses such as /decks/abc, /users/kevin, /account and /login
+# have no file behind them, so hand them to index.html and let the app show the right page.
+# Real files (styles.css, app.js, logo.svg...) are served as usual; anything else still 404s.
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(decks|users|account|login)(/|$) index.html [L]

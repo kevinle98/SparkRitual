@@ -190,7 +190,7 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
 dialog[open] { display: flex; flex-direction: column; gap: 8px; }
 dialog.wide { width: 94vw; max-width: 2000px; height: 80vh; }
 #viewDialog { width: min(320px, 94vw); }
-#appSettingsDialog, #authDialog { width: min(460px, 94vw); }
+#appSettingsDialog { width: min(460px, 94vw); }
 #settingsDialog { width: min(520px, 94vw); }
 #aboutDialog { width: min(560px, 94vw); }
 .dialog-head { display: flex; justify-content: space-between; align-items: center; }
@@ -238,9 +238,23 @@ dialog textarea { width: 100%; height: 50vh; resize: vertical; font: 15.6px/1.5 
 .share-row { display: flex; gap: 8px; }
 .share-row input { flex: 1; }
 #shareBox select { width: 100%; }
-.auth-alt { display: flex; gap: 8px; flex-wrap: wrap; }
-.auth-alt button { flex: 1; gap: 8px; white-space: nowrap; }
-.auth-alt svg { width: 18px; height: 18px; flex: none; }
+/* login page (/login) */
+body.login #builder, body.login .builder-only, body:not(.login) #login { display: none; }
+.login-page { flex: 1; min-height: 0; overflow-y: auto; display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px; box-sizing: border-box; }
+.login-card { width: min(400px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 32px 28px; overflow: visible; }
+.login-logo { width: 56px; height: auto; margin-bottom: 4px; }
+.login-card h2 { margin: 0; font-size: 22px; }
+.login-card .msg { margin: 0 0 8px; }
+.login-options { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 8px; }
+.login-options button { width: 100%; gap: 10px; padding: 11px 14px; font-size: 16px; }
+/* provider marks are single-colour and take the text colour */
+.login-options svg, .link-row svg { flex: none; fill: currentColor; }
+.login-options svg { width: 20px; height: 20px; }
+.link-row svg { width: 18px; height: 18px; color: var(--muted); }
+.link-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.link-row + .link-row { border-top: 1px solid var(--line); }
+.link-row .who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.link-row .who small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* landing page */
 body.home #builder, body.home .builder-only, body:not(.home) #home, body:not(.home) .home-only { display: none; }
@@ -395,7 +409,45 @@ body.shared .slot button, body.shared .row .acts, body.shared .tile .acts { disp
   .panel { max-height: 80vh; }
 }
 
+/* loading indicator: the logo's three circles revolving around their centre (markup from spinnerHtml in app.js) */
+.spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 28px 0; color: var(--muted); }
+.spinner svg { width: 44px; height: 44px; fill: var(--accent); animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin-still { 50% { opacity: .45; } }
+
+/* full-page loading screen: shown until the landing page (or a public profile) is fully ready */
+.loading { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; background: var(--bg); transition: opacity .3s; }
+.loading.out { opacity: 0; pointer-events: none; }
+body:has(> .loading:not([hidden])) { overflow: hidden; } /* nothing scrolls behind the screen */
+.loading svg { width: 96px; height: 96px; fill: var(--accent); animation: spin 1.2s linear infinite; }
+.loading-text { font-size: clamp(24px, 4.5vw, 34px); font-weight: 600; letter-spacing: .01em; }
+
 @media (prefers-reduced-motion: reduce) {
-  dialog.side-nav[open], .slide, .tile-art { animation: none; transition: none; }
+  dialog.side-nav[open], .slide, .tile-art, .loading { animation: none; transition: none; }
   .tile-art:hover, .tile-art:focus-visible { transform: none; }
+  .spinner svg, .loading svg { animation: spin-still 1.6s ease-in-out infinite; } /* a gentle fade instead of spinning */
 }
+/* account settings page (#account, signed-in only) */
+body.account #builder, body.account .builder-only, body:not(.account) #account { display: none; }
+.account-page { flex: 1; min-height: 0; overflow-y: auto; }
+.account-inner { width: min(640px, 100%); margin: 0 auto; padding: 20px 16px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; }
+.account-inner h2 { margin: 0 0 4px; font-size: 24px; }
+.acct-card { overflow: visible; }
+.acct-card h3 { margin: 0 0 8px; font-size: 16px; }
+.acct-card .msg { margin-bottom: 0; }
+#acctNameMsg.ok { color: var(--ok); }
+.acct-public { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.acct-public small { font-size: 13px; }
+
+/* public profile page (?u=<name>): the landing page, read-only */
+.profile-only { display: none; }
+body.profile .profile-only { display: inline-block; }
+body.profile .opts-btn { display: none; }
+.choice { display: flex; align-items: flex-start; gap: 10px; padding: 8px 2px; cursor: pointer; }
+.choice input { margin: 3px 0 0; padding: 0; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex: none; }
+.choice span { display: flex; flex-direction: column; gap: 2px; }
+.choice small { color: var(--muted); font-size: 14px; }
+.acct-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.acct-actions .msg { margin: 0 auto 0 0; }
+.acct-session { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.acct-session .msg { margin: 0; }

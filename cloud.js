@@ -8,7 +8,8 @@ const Cloud = (() => {
   const listeners = [];
   let sb = null;
 
-  const redirect = () => location.href.split(/[?#]/)[0];
+  // Providers send the user back to the app's root, whatever page they started from.
+  const redirect = () => new URL('.', document.baseURI).href;
   const check = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
 
   // A failed OAuth sign-in comes back as ?error=... (or #error=...). Grab the message
@@ -28,7 +29,7 @@ const Cloud = (() => {
     api.user = user;
     api.profile = null;
     if (user) {
-      const { data } = await sb.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
+      const { data } = await sb.from('profiles').select('display_name, decks_visible').eq('id', user.id).maybeSingle();
       api.profile = data;
     }
   }
@@ -53,15 +54,25 @@ const Cloud = (() => {
     });
   }).catch(e => { api.enabled = false; console.warn(e); });
 
-  api.signInEmail = async email => check(await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect() } }));
   api.signInOAuth = async provider => check(await sb.auth.signInWithOAuth({ provider, options: { redirectTo: redirect() } }));
   api.signOut = async () => check(await sb.auth.signOut());
 
-  api.setDisplayName = async name => {
-    if (!/^\w{2,32}$/.test(name)) throw new Error('Use 2-32 letters, numbers or underscores.');
-    const { error } = await sb.from('profiles').update({ display_name: name }).eq('id', api.user.id);
+  // Identity linking. Needs "Allow manual linking" turned on in the Supabase dashboard.
+  api.identities = async () => check(await sb.auth.getUserIdentities()).identities;
+  api.linkOAuth = async provider => check(await sb.auth.linkIdentity({ provider, options: { redirectTo: redirect() } }));
+  api.unlink = async identity => check(await sb.auth.unlinkIdentity(identity));
+
+  // Display names: 2-32 letters, numbers or underscores, unique ignoring case.
+  api.NAME_RULE = 'Use 2-32 letters, numbers or underscores.';
+  api.validName = name => /^\w{2,32}$/.test(name);
+  api.nameAvailable = async name => check(await sb.rpc('display_name_available', { p_name: name }));
+
+  // changes: any of { display_name, decks_visible }.
+  api.updateProfile = async changes => {
+    if ('display_name' in changes && !api.validName(changes.display_name)) throw new Error(api.NAME_RULE);
+    const { error } = await sb.from('profiles').update(changes).eq('id', api.user.id);
     if (error) throw new Error(error.code === '23505' ? 'That name is already taken.' : error.message);
-    api.profile = { display_name: name };
+    api.profile = { ...api.profile, ...changes };
   };
 
   // Decks are stored as ids and quantities only; card data is re-fetched from Scryfall.
@@ -81,6 +92,8 @@ const Cloud = (() => {
   api.pushRow = async row => check(await sb.from('decks').upsert(row));
   api.removeDeck = async id => check(await sb.from('decks').delete().eq('id', id));
   api.getDeck = async id => check(await sb.rpc('get_deck', { p_id: id }));
+  // { owner, owner_id, decks: [row] } for a Visible account, or null.
+  api.getProfile = async name => check(await sb.rpc('get_profile_decks', { p_name: name }));
 
   return api;
 })();
