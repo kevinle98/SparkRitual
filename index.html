@@ -12,15 +12,18 @@
     <!-- Pages live at paths like /decks/abc, so assets must resolve from the app's root folder.
          If SparkRitual sits in a subfolder of the domain, change "/" to "/that-folder/". -->
     <script>if (location.protocol !== 'file:') document.write('<base href="/">');</script>
-    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link rel="icon" type="image/svg+xml" href="logo.svg?v=20261112a">
     <script>try { if (localStorage.getItem('sparkritual.theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}</script>
-    <link rel="stylesheet" href="styles.css?v=20261111k">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@100..900&family=Lexend:wght@100..900&display=swap">
+    <link rel="stylesheet" href="styles.css?v=20261112l">
   </head>
 
   <body class="home">
     <!-- Loading screen: visible from the first paint; app.js hides it once the landing page is ready. -->
     <div id="loading" class="loading" role="status">
-      <svg viewBox="-232 -232 464 464" aria-hidden="true"><circle cx="0" cy="-136" r="94"/><circle cx="-117.8" cy="68" r="94" opacity=".7"/><circle cx="117.8" cy="68" r="94" opacity=".4"/></svg>
+      <svg viewBox="-232 -232 464 464" aria-hidden="true"><circle cx="0" cy="-136" r="94" fill="#AE76D4"/><circle cx="-117.8" cy="68" r="94" fill="#906DBD"/><circle cx="117.8" cy="68" r="94" fill="#62488F"/></svg>
       <div class="loading-text">Untapping lands...</div>
     </div>
     <svg hidden><symbol id="ico-google" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></symbol><symbol id="ico-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></symbol></svg>
@@ -28,7 +31,7 @@
       <button id="menuBtn" class="menu-btn" aria-label="Open menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="sideNav">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
       </button>
-      <h1><a href="#"><img class="logo" src="logo.svg" alt=""><span class="brand-text">SparkRitual</span></a></h1>
+      <h1><a href="#"><img class="logo" src="logo.svg?v=20261112a" alt=""><span class="brand-text">SparkRitual</span></a></h1>
       <span id="deckTitle" class="deck-title builder-only"></span>
       <span id="profileTitle" class="deck-title profile-only"></span>
       <input id="deckNameInput" class="deck-name-input builder-only" type="text" maxlength="100" spellcheck="false" autocomplete="off" aria-label="Deck name" title="Click to rename">
@@ -127,9 +130,20 @@
       </div>
     </main>
 
-    <main class="login-page" id="login" hidden>
-      <div class="login-card panel">
-        <img class="login-logo" src="logo.svg" alt="">
+    <main class="art-page" id="welcome" hidden>
+      <div class="art-card welcome-card">
+        <h2 class="welcome-title"><img class="welcome-logo" src="logo.svg?v=20261112a" alt=""><span class="brand-text">SparkRitual</span></h2>
+        <p class="msg">Build Commander decks with card search that knows your color identity, see a bracket estimate before Rule Zero, and draw test hands to see how a deck opens.</p>
+        <div class="welcome-actions">
+          <button id="welcomeLogin">Log in</button>
+          <button id="welcomeStart" class="primary">Get started</button>
+        </div>
+      </div>
+    </main>
+
+    <main class="art-page" id="login" hidden>
+      <div class="art-card">
+        <img class="art-logo" src="logo.svg?v=20261112a" alt="">
         <h2>Sign in to SparkRitual</h2>
         <p class="msg">Save your decks online, share them, and open them on any device. Decks already in this browser stay available.</p>
         <div class="login-options">
@@ -139,6 +153,88 @@
         <div id="loginMsg" class="msg"></div>
       </div>
     </main>
+
+    <!-- Document pages (/about, /terms, /privacy): plain text pages; the site footer adds the fine print. -->
+    <main class="legal-page" id="about" hidden>
+      <article class="legal-doc about-doc">
+        <h2>About SparkRitual</h2>
+        <p class="about-tag">Made <strong>by</strong> players, <strong>for</strong> players.</p>
+        <p>SparkRitual is a Commander deck builder from people who sleeve up every week. We built the tool we wanted at our own tables: fast card search that knows your commander's color identity, an honest bracket estimate before Rule Zero talks, and test hands to see how a deck opens.</p>
+        <p>There's no paywall and no ads. Brew, tinker, share your decks, and get back to playing.</p>
+      </article>
+    </main>
+
+    <main class="legal-page" id="terms" hidden>
+      <article class="legal-doc">
+        <h2>Terms of Service</h2>
+        <p class="legal-date">Effective November 12, 2026</p>
+        <p>These terms cover your use of SparkRitual, a free Commander deck builder. By using the site you agree to them. If you don't agree, please don't use SparkRitual.</p>
+
+        <h3>The service</h3>
+        <p>SparkRitual lets you build, save and share Magic: The Gathering Commander decks. It is free, provided as a hobby project, and offered "as is" and "as available". Features may change, pause or end at any time, with or without notice.</p>
+
+        <h3>Your account</h3>
+        <p>You don't need an account to build decks; without one, your decks are kept only in your browser. Signing in with Google or Discord lets you save decks online and share them. You're responsible for activity on your account and for keeping access to the Google or Discord account you sign in with.</p>
+
+        <h3>Your content</h3>
+        <p>You keep ownership of what you create, such as deck names, descriptions and card lists. By setting a deck to Unlisted or Public, you allow SparkRitual to show it to anyone with the link or on your public profile page. Please don't post anything unlawful, hateful, harassing, or that infringes someone else's rights. We may remove content or suspend accounts that break these terms.</p>
+
+        <h3>Acceptable use</h3>
+        <p>Don't attempt to disrupt the site, access other people's accounts or private decks, scrape it at volume, or use it to send spam or malware.</p>
+
+        <h3>Card data and prices</h3>
+        <p>Card data, images and prices come from Scryfall and may be incomplete, out of date or wrong. Prices are estimates only; check a store for final prices. Bracket estimates are a guide to start a Rule Zero conversation, not an official rating.</p>
+
+        <h3>Intellectual property</h3>
+        <p>SparkRitual is unofficial Fan Content and is not approved or endorsed by Wizards of the Coast. Magic: The Gathering card names, text, images and symbols are the property of Wizards of the Coast LLC.</p>
+
+        <h3>Disclaimer and limitation of liability</h3>
+        <p>To the extent the law allows, SparkRitual is provided without warranties of any kind, and we aren't liable for any loss arising from your use of it, including lost decks or data. Keep your own export of any deck you care about.</p>
+
+        <h3>Changes</h3>
+        <p>We may update these terms. The effective date above shows when they last changed, and continuing to use SparkRitual after a change means you accept the new terms.</p>
+      </article>
+    </main>
+
+    <main class="legal-page" id="privacy" hidden>
+      <article class="legal-doc">
+        <h2>Privacy Policy</h2>
+        <p class="legal-date">Effective November 12, 2026</p>
+        <p>SparkRitual collects as little as it needs to save and share your decks. We don't sell your information, show ads, or use analytics or tracking cookies.</p>
+
+        <h3>Without an account</h3>
+        <p>Your decks and preferences (such as theme, view and sort order) are stored in your own browser's local storage. They never leave your device unless you sign in.</p>
+
+        <h3>With an account</h3>
+        <p>When you sign in with Google or Discord, we receive your email address, a unique account ID and, where available, your name from that provider. We store your account, your display name, and the decks you save, including their names, descriptions, card lists and visibility settings.</p>
+        <p>Your display name and any decks you set to Unlisted or Public can be seen by other people. Private decks, and everything when your account's deck visibility is set to Hidden, are visible only to you.</p>
+
+        <h3>Services we rely on</h3>
+        <ul>
+          <li><strong>Supabase</strong> hosts our database and handles sign-in.</li>
+          <li><strong>Google</strong> and <strong>Discord</strong> confirm your identity when you sign in with them.</li>
+          <li><strong>Scryfall</strong> receives your card searches directly from your browser and serves card data and images.</li>
+          <li><strong>Google Fonts</strong> and <strong>jsDelivr</strong> serve fonts and a code library to your browser.</li>
+        </ul>
+        <p>Like any website, these services receive your IP address and basic browser information when your browser contacts them, under their own privacy policies.</p>
+
+        <h3>Your choices</h3>
+        <p>You can change your display name and deck visibility in Account Settings, delete decks at any time, and sign out to stop syncing. To have your account and all its data deleted, contact us at <!-- TODO: add a real contact address --><a href="mailto:privacy@sparkritual.io">privacy@sparkritual.io</a>.</p>
+
+        <h3>Children</h3>
+        <p>SparkRitual isn't directed at children under 13, and we don't knowingly collect their information.</p>
+
+        <h3>Changes</h3>
+        <p>We may update this policy. The effective date above shows when it last changed.</p>
+      </article>
+    </main>
+
+    <!-- Fine-print footer. app.js moves it into whichever page is showing (login, account, about, terms, privacy). -->
+    <footer id="siteFooter" class="site-footer" hidden>
+      <nav class="footer-links"><a data-route="terms">Terms of Service</a><span aria-hidden="true">·</span><a data-route="privacy">Privacy Policy</a></nav>
+      <p>SparkRitual is unofficial Fan Content permitted under the <a href="https://company.wizards.com/en/legal/fancontentpolicy" target="_blank" rel="noopener">Fan Content Policy</a>. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. Wizards of the Coast, Magic: The Gathering, and their logos are trademarks of Wizards of the Coast LLC in the United States and other countries. MAGIC: THE GATHERING&reg; is a trademark of Wizards of the Coast. &copy; 1993&ndash;2026 Wizards of the Coast LLC. All Rights Reserved. For more information about Wizards of the Coast or any of Wizards' trademarks or other intellectual property, please visit their website at <a href="https://company.wizards.com/" target="_blank" rel="noopener">company.wizards.com</a>.</p>
+      <p>Card data, images and prices courtesy of <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>. Scryfall makes no guarantee about its price information and recommends you see stores for final prices and details.</p>
+    </footer>
 
     <main class="layout" id="builder">
       <aside class="panel preview" id="preview"></aside>
@@ -294,38 +390,29 @@
     <dialog id="sideNav" class="side-nav" aria-label="Menu">
       <nav class="side-nav-inner">
         <div class="side-nav-head">
-          <span class="side-nav-brand"><img class="logo" src="logo.svg" alt=""><span class="brand-text">SparkRitual</span></span>
+          <span class="side-nav-brand"><img class="logo" src="logo.svg?v=20261112a" alt=""><span class="brand-text">SparkRitual</span></span>
           <button class="menu-btn" data-close aria-label="Close menu">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
           </button>
         </div>
         <button id="newBtn" class="side-nav-item">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>New Deck</button>
-        <button id="accountBtn" class="side-nav-item" hidden>
-          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.2"/><path d="M3.5 17c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/></svg>Account Settings</button>
-        <div class="side-nav-spacer"></div>
-        <button class="side-nav-item" data-dialog="aboutDialog">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.2" r=".6" fill="currentColor"/></svg>About</button>
-        <button class="side-nav-item" data-dialog="appSettingsDialog">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
         <button id="loginBtn" class="side-nav-item" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>Log in</button>
         <button id="logoutBtn" class="side-nav-item" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Sign out</button>
+        <button id="accountBtn" class="side-nav-item" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.2"/><path d="M3.5 17c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/></svg>Account Settings</button>
+        <div class="side-nav-spacer"></div>
+        <button id="aboutBtn" class="side-nav-item">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.2" r=".6" fill="currentColor"/></svg>About</button>
+        <button id="termsBtn" class="side-nav-item">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 2.5h6l3.5 3.5v11.5h-9.5z"/><path d="M11.5 2.5V6H15M8 10h4.5M8 13h4.5"/></svg>Terms of Service</button>
+        <button id="privacyBtn" class="side-nav-item">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l6 2.2v4.6c0 4-2.6 6.9-6 8.2-3.4-1.3-6-4.2-6-8.2V4.7z"/></svg>Privacy Policy</button>
+        <button class="side-nav-item" data-dialog="appSettingsDialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
       </nav>
-    </dialog>
-
-    <dialog id="aboutDialog">
-      <div class="dialog-head">
-        <h2>About SparkRitual</h2>
-        <button data-close>Close</button>
-      </div>
-      <div class="about">
-        <p class="about-tag">Made <strong>by</strong> players, <strong>for</strong> players.</p>
-        <p>SparkRitual is a Commander deck builder from people who sleeve up every week. We built the tool we wanted at our own tables: fast card search that knows your commander's color identity, an honest bracket estimate before Rule Zero talks, and test hands to see how a deck opens.</p>
-        <p>There's no paywall and no ads. Brew, tinker, share your decks, and get back to playing.</p>
-        <p class="about-fine">Card data and images courtesy of <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>. SparkRitual is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. &copy;Wizards of the Coast LLC.</p>
-      </div>
     </dialog>
 
     <dialog id="appSettingsDialog">
@@ -339,6 +426,6 @@
 
     <script src="config.js?v=20261111k"></script>
     <script src="cloud.js?v=20261111k"></script>
-    <script src="app.js?v=20261111k"></script>
+    <script src="app.js?v=20261112g"></script>
   </body>
 </html>

@@ -51,7 +51,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* Trim the text box to cap height..baseline so flex centering lines the logo up with the letters,
    not with the font's ascender/descender space. (Chromium/Safari; others fall back to box centering.) */
-.brand-text { display: block; line-height: 1; text-box: trim-both cap alphabetic; }
+.brand-text { font-family: 'Lexend', system-ui, sans-serif; display: block; line-height: 1; text-box: trim-both cap alphabetic; }
 .spacer { flex: 1; }
 .topbar label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .deck-title { position: relative; top: -.065em; font-weight: 400; font-size: 20px; line-height: 1.2; max-width: 50vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -192,7 +192,6 @@ dialog.wide { width: 94vw; max-width: 2000px; height: 80vh; }
 #viewDialog { width: min(320px, 94vw); }
 #appSettingsDialog { width: min(460px, 94vw); }
 #settingsDialog { width: min(520px, 94vw); }
-#aboutDialog { width: min(560px, 94vw); }
 .dialog-head { display: flex; justify-content: space-between; align-items: center; }
 .dialog-head h2 { margin: 0; font-size: 20px; }
 .dialog-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
@@ -227,26 +226,47 @@ dialog textarea { width: 100%; height: 50vh; resize: vertical; font: 15.6px/1.5 
 .new-preview dl { margin-top: 8px; }
 
 /* settings / account */
-.about { overflow-y: auto; line-height: 1.55; }
-.about p { margin: 0 0 12px; }
-.about-tag { font-size: 22px; font-weight: 700; color: var(--accent); }
-.about-tag strong { font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
-.about-fine { margin-top: 18px !important; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
-.about-fine a { color: inherit; }
 .setting-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px; cursor: pointer; }
 .setting-row input[type="checkbox"] { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--accent); cursor: pointer; }
 .share-row { display: flex; gap: 8px; }
 .share-row input { flex: 1; }
 #shareBox select { width: 100%; }
-/* login page (/login) */
+/* login (/login) and welcome (/welcome) pages */
 body.login #builder, body.login .builder-only, body:not(.login) #login { display: none; }
-.login-page { flex: 1; min-height: 0; overflow-y: auto; display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px; box-sizing: border-box; }
-.login-card { width: min(400px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 32px 28px; overflow: visible; }
-.login-logo { width: 56px; height: auto; margin-bottom: 4px; }
-.login-card h2 { margin: 0; font-size: 22px; }
-.login-card .msg { margin: 0 0 8px; }
+body.welcome #builder, body.welcome .builder-only, body:not(.welcome) #welcome { display: none; }
+/* Full-bleed artwork under a dark purple tint, shared by both pages. They keep the dark palette in both
+   themes so the text stays readable on the art. */
+.art-page {
+  --text: #eee6eef3; --muted: #c9bccf; --panel2: rgba(35, 30, 39, .75); --line: rgba(238, 230, 238, .3);
+  color-scheme: dark; color: var(--text);
+  flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; padding: 48px 16px 0; box-sizing: border-box;
+  position: relative; isolation: isolate; background: #12061e;
+}
+/* The art sits on its own layer so it can be blurred without blurring the text. It overhangs the page
+   (clipped by overflow: hidden) so the blur doesn't fade in at the edges. */
+.art-page::before {
+  content: ""; position: absolute; inset: -24px; z-index: -1; filter: blur(8px);
+  background: linear-gradient(rgba(30, 12, 48, .85), rgba(18, 6, 30, .95)), url("images/login-bg.jpg") center / cover no-repeat;
+}
+/* The page itself can't scroll (it clips the blur), so the card shrinks and scrolls on very short screens
+   instead. margin: auto centres it in the space above the footer. */
+.art-card { width: min(400px, 100%); min-height: 0; overflow-y: auto; margin: auto 0; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 32px 28px; text-shadow: 0 1px 6px rgba(0, 0, 0, .8); }
+.art-logo { width: 56px; height: auto; margin-bottom: 4px; }
+.art-card h2 { margin: 0; font-size: 22px; }
+.art-card .msg { margin: 0 0 8px; }
+
+.welcome-card { width: min(520px, 100%); }
+/* Logo left of the name, centred on the letters: .brand-text trims the text box to cap height..baseline
+   (same as the top bar), so flex centring lines the logo up with the letters, not the font's spare space. */
+.art-card .welcome-title { display: flex; align-items: center; justify-content: center; gap: .25em; margin-bottom: 12px; font-family: 'Lexend', system-ui, sans-serif; font-size: clamp(36px, 8vw, 52px); font-weight: 700; line-height: 1; color: var(--accent); }
+.welcome-logo { height: 1.1em; width: auto; flex: none; }
+.welcome-card .msg { font-size: 17px; margin-bottom: 16px; }
+.welcome-actions { display: flex; gap: 12px; width: 100%; max-width: 380px; }
+.welcome-actions button { flex: 1; padding: 11px 14px; font-size: 16px; border-radius: 999px; text-shadow: none; backdrop-filter: blur(6px); }
+.welcome-actions .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.welcome-actions .primary:hover { filter: brightness(1.15); }
 .login-options { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 8px; }
-.login-options button { width: 100%; gap: 10px; padding: 11px 14px; font-size: 16px; }
+.login-options button { width: 100%; gap: 10px; padding: 11px 14px; font-size: 16px; border-radius: 999px; text-shadow: none; backdrop-filter: blur(6px); }
 /* provider marks are single-colour and take the text colour */
 .login-options svg, .link-row svg { flex: none; fill: currentColor; }
 .login-options svg { width: 20px; height: 20px; }
@@ -420,13 +440,37 @@ body.shared .slot button, body.shared .row .acts, body.shared .tile .acts { disp
 .loading.out { opacity: 0; pointer-events: none; }
 body:has(> .loading:not([hidden])) { overflow: hidden; } /* nothing scrolls behind the screen */
 .loading svg { width: 96px; height: 96px; fill: var(--accent); animation: spin 1.2s linear infinite; }
-.loading-text { font-size: clamp(24px, 4.5vw, 34px); font-weight: 600; letter-spacing: .01em; }
+.loading-text { font-family: 'League Spartan', system-ui, sans-serif; font-size: clamp(20px, 3.8vw, 28px); font-weight: 400; letter-spacing: .01em; }
 
 @media (prefers-reduced-motion: reduce) {
   dialog.side-nav[open], .slide, .tile-art, .loading { animation: none; transition: none; }
   .tile-art:hover, .tile-art:focus-visible { transform: none; }
   .spinner svg, .loading svg { animation: spin-still 1.6s ease-in-out infinite; } /* a gentle fade instead of spinning */
 }
+/* fine-print footer (#siteFooter): app.js moves it into the page being shown */
+.site-footer { flex: none; width: min(1200px, 100%); margin: 0 auto; padding: 20px 16px 20px; box-sizing: border-box; text-align: left; font-size: 10.5px; line-height: 1.45; color: var(--muted); }
+.site-footer p { margin: 0 0 4px; }
+.site-footer a { color: inherit; }
+.footer-links { display: flex; gap: 8px; margin-bottom: 6px; font-size: 11.5px; }
+.art-page .site-footer { text-shadow: 0 1px 4px rgba(0, 0, 0, .8); }
+
+/* Document pages: About (/about), Terms of Service (/terms) and Privacy Policy (/privacy) */
+body.about #builder, body.about .builder-only, body:not(.about) #about,
+body.terms #builder, body.terms .builder-only, body:not(.terms) #terms,
+body.privacy #builder, body.privacy .builder-only, body:not(.privacy) #privacy { display: none; }
+.legal-page { flex: 1; min-height: 0; overflow-y: auto; }
+.legal-doc { width: min(720px, 100%); margin: 0 auto; padding: 28px 16px 8px; box-sizing: border-box; line-height: 1.6; }
+.legal-doc h2 { margin: 0; font-size: 26px; }
+.legal-doc h3 { margin: 24px 0 6px; font-size: 18px; }
+.legal-doc p, .legal-doc ul { margin: 0 0 10px; }
+.legal-doc .legal-date { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+.legal-doc a { color: var(--accent); }
+/* About: a short left-aligned block, vertically centred in the space above the footer */
+#about { display: flex; flex-direction: column; }
+.about-doc { margin: auto; padding: 40px 16px; }
+.legal-doc .about-tag { margin: 14px 0 16px; font-size: 22px; font-weight: 700; color: var(--accent); }
+.about-tag strong { font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+
 /* account settings page (#account, signed-in only) */
 body.account #builder, body.account .builder-only, body:not(.account) #account { display: none; }
 .account-page { flex: 1; min-height: 0; overflow-y: auto; }

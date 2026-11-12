@@ -52,16 +52,31 @@ const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ESC_MAP[c]);
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
 // Loading indicator: the logo's three circles revolving around their centre (styling in .spinner).
-const spinnerHtml = (label = 'Loading...') => `<div class="spinner" role="status"><svg viewBox="-232 -232 464 464" aria-hidden="true"><circle cx="0" cy="-136" r="94"/><circle cx="-117.8" cy="68" r="94" opacity=".7"/><circle cx="117.8" cy="68" r="94" opacity=".4"/></svg><span>${esc(label)}</span></div>`;
+const spinnerHtml = (label = 'Loading...') => `<div class="spinner" role="status"><svg viewBox="-232 -232 464 464" aria-hidden="true"><circle cx="0" cy="-136" r="94" fill="#AE76D4"/><circle cx="-117.8" cy="68" r="94" fill="#906DBD"/><circle cx="117.8" cy="68" r="94" fill="#62488F"/></svg><span>${esc(label)}</span></div>`;
 
 // Full-page loading screen (#loading, in the HTML from the first paint). It covers everything until the
 // landing page is ready: the sign-in library loaded, the first sync done, and the selected cover drawn.
-const LOADING_LINES = ['Floating 3 mana...', 'Holding priority...', 'Untapping lands...', 'In response...'];
-let loadingTok = 0, bootDone = false;
+const LOADING_LINES = ['Floating 3 mana...', 'Holding priority...', 'Untapping lands...', 'In response...',
+  'Declaring attacks...', 'Declaring blocks...', 'Drawing for turn...', 'Cracking this token...',
+  'Moving through phases...', 'Paying the 1...', 'Fetching a land...'];
+let loadingTok = 0, bootDone = false, lineTimer = 0;
+const LINE_MS = 2000; // how long each message stays before the next
+// Shows a random message, never the one already showing.
+function nextLoadingLine() {
+  const text = $('loading').querySelector('.loading-text');
+  const others = LOADING_LINES.filter(l => l !== text.textContent);
+  text.textContent = others[Math.floor(Math.random() * others.length)];
+}
+// (Re)starts the rotation, so each message gets its full time on screen.
+function rotateLoadingLines() {
+  clearInterval(lineTimer);
+  lineTimer = setInterval(nextLoadingLine, LINE_MS);
+}
 function showLoading() {
   const el = $('loading');
   loadingTok++;
-  el.querySelector('.loading-text').textContent = LOADING_LINES[Math.floor(Math.random() * LOADING_LINES.length)];
+  nextLoadingLine();
+  rotateLoadingLines();
   el.classList.remove('out');
   el.hidden = false;
 }
@@ -70,8 +85,9 @@ function hideLoading() {
   if (el.hidden) return;
   const tok = ++loadingTok;
   el.classList.add('out'); // fade, then drop out of the layout
-  setTimeout(() => { if (tok === loadingTok) { el.hidden = true; el.classList.remove('out'); } }, 300);
+  setTimeout(() => { if (tok === loadingTok) { el.hidden = true; el.classList.remove('out'); clearInterval(lineTimer); } }, 300);
 }
+rotateLoadingLines(); // the screen is up from the first paint, showing the message written in the HTML
 // Resolves once the selected carousel cover has loaded (or soon enough if it won't).
 const coverReady = () => new Promise(res => {
   const img = $('carousel').querySelector('.slide.sel img.cover');
@@ -416,7 +432,7 @@ function showHome() {
   if (!bootDone) showLoading(); // first visit: keep the loading screen up until finishBoot()
   document.body.classList.add('home');
   homeSel = 0;
-  homeList = []; // start on the most recent deck rather than restoring the old selection
+  homeList = []; // start fresh (renderHome picks the middle deck) rather than restoring the old selection
   renderHome();
 }
 
@@ -456,6 +472,10 @@ function route() {
   profileCache.clear();
   if (path === 'account') return showAccount();
   if (path === 'login') return showLogin();
+  if (path === 'welcome') return showWelcome();
+  if (DOC_PAGES.includes(path)) return showDocPage(path);
+  // A bare root opens the welcome page for a newcomer (no decks in this browser), decks/personal otherwise.
+  if (!path && !location.search && location.hash.length < 2 && !Object.keys(decks).length) return go('welcome', true);
   // A bare root becomes decks/personal at once. A root carrying a query or hash is left alone for now:
   // sign-in returns land there with ?code=, which the Supabase library must read first (Cloud.ready tidies it).
   if (path !== 'decks/personal' && (path || (!location.search && location.hash.length < 2))) return go('decks/personal', true);
@@ -563,7 +583,10 @@ function renderHome() {
   const keepId = homeList[homeSel]?.id;
   homeList = sortDecks(viewing ? [...(viewing.decks || [])] : Object.values(decks));
   const kept = keepId ? homeList.findIndex(d => d.id === keepId) : -1;
-  homeSel = Math.max(0, Math.min(kept >= 0 ? kept : homeSel, homeList.length - 1));
+  // Nothing selected yet (a fresh visit, or decks just arrived): the carousel starts on its middle deck,
+  // the gallery and list on the first.
+  const fresh = !keepId ? (homeView === 'carousel' ? Math.floor((homeList.length - 1) / 2) : 0) : homeSel;
+  homeSel = Math.max(0, Math.min(kept >= 0 ? kept : fresh, homeList.length - 1));
   stopStepping();
   deckMenu.close();
   const carousel = $('carousel');
@@ -811,6 +834,7 @@ $('homeView').addEventListener('change', e => {
   homeView = HOME_VIEWS.includes(e.target.value) ? e.target.value : 'carousel';
   store.set('sparkritual.homeView', homeView);
   $('home').scrollTop = 0;
+  if (homeView === 'carousel') homeList = []; // switching to the carousel starts on its middle deck
   if (bodyIs('home')) renderHome();
 });
 
@@ -1952,6 +1976,8 @@ function leaveViewer() {
   document.body.classList.remove('shared', 'profile');
   setPage('account', false);
   setPage('login', false);
+  setPage('welcome', false);
+  DOC_PAGES.forEach(id => setPage(id, false));
   sharedInfo = null;
   sharedId = null;
   viewing = null;
@@ -2094,6 +2120,27 @@ let loginNotice = null; // [text, bad] to show when the page next opens
 function setPage(id, on) {
   document.body.classList.toggle(id, on);
   $(id).hidden = !on;
+  // The fine-print footer moves into the page being shown, so it scrolls with that page's content
+  // and hides along with it.
+  if (on && FOOTER_PAGES.includes(id)) { $(id).appendChild(siteFooter); siteFooter.hidden = false; }
+}
+const DOC_PAGES = ['about', 'terms', 'privacy'];
+// Not the welcome page: it stays clean, and the side menu links Terms and Privacy from every page.
+const FOOTER_PAGES = ['login', 'account', ...DOC_PAGES];
+const siteFooter = $('siteFooter');
+// Footer links route inside the app instead of reloading the page.
+siteFooter.querySelectorAll('a[data-route]').forEach(a => {
+  a.href = hrefFor(a.dataset.route);
+  a.addEventListener('click', e => { e.preventDefault(); go(a.dataset.route); });
+});
+
+/* Document pages: About (/about), Terms of Service (/terms) and Privacy Policy (/privacy) */
+function showDocPage(id) {
+  persist();
+  state.id = null;
+  document.body.classList.remove('home');
+  setPage(id, true);
+  $(id).scrollTop = 0;
 }
 
 // Sends a signed-out visitor to the login page with a note saying why.
@@ -2115,7 +2162,21 @@ async function showLogin() {
   if (Cloud.user || !Cloud.enabled) go('decks/personal', true); // already signed in, or nothing to sign in to
 }
 
+/* Welcome page (/welcome): the newcomer's front door */
+
+function showWelcome() {
+  persist();
+  state.id = null;
+  document.body.classList.remove('home');
+  setPage('welcome', true);
+}
+$('welcomeLogin').addEventListener('click', () => go('login'));
+$('welcomeStart').addEventListener('click', () => go('decks/personal'));
+
 $('accountBtn').addEventListener('click', () => go('account'));
+$('aboutBtn').addEventListener('click', () => go('about'));
+$('termsBtn').addEventListener('click', () => go('terms'));
+$('privacyBtn').addEventListener('click', () => go('privacy'));
 $('loginBtn').addEventListener('click', () => go('login'));
 $('logoutBtn').addEventListener('click', async () => {
   for (const id of [...cloudTimers.keys()]) { clearTimeout(cloudTimers.get(id)); await pushNow(id); } // don't lose pending edits
